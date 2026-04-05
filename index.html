@@ -16,8 +16,8 @@
   <body>
     <div id="app"></div>
     <div class="hud">
-      <div class="panel panel-left panel-mission">
-        <p class="panel-label">Operation</p>
+      <div class="panel panel-left">
+        <p class="panel-label">Mission</p>
         <p class="panel-value" id="status">Secure the arena.</p>
       </div>
       <div class="panel panel-right">
@@ -35,18 +35,6 @@
         </div>
       </div>
     </div>
-    <div class="deck" aria-hidden="true">
-      <div class="deck-card weapon-card">
-        <p class="deck-label">Loadout</p>
-        <h2>VX-9 Arc Blaster</h2>
-        <p class="deck-copy">Infinite core // pulse recoil compensator</p>
-      </div>
-      <div class="deck-card build-card">
-        <p class="deck-label">Prototype</p>
-        <p class="build-value">Browser FPS from scratch</p>
-        <p class="deck-copy">Three.js arena demo, live on Vercel</p>
-      </div>
-    </div>
     <div class="crosshair" aria-hidden="true">
       <span></span>
       <span></span>
@@ -55,11 +43,9 @@
       <div class="overlay-card">
         <p class="eyebrow">From scratch demo</p>
         <h1 id="overlay-title">Neon Siege</h1>
-        <p class="overlay-subtitle">Arc Sector // VX-9 loadout online</p>
         <p id="overlay-copy">
-          Drop into the arena with a visible pulse rifle, clear incoming drones,
-          and show that a browser-based first person shooter can be built from
-          zero to live demo fast.
+          A browser FPS prototype. Lock the pointer, move with WASD, jump with
+          Space, and click to eliminate incoming drones.
         </p>
         <button id="start-button" type="button">Start mission</button>
         <ul class="controls">
