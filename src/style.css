@@ -123,6 +123,10 @@ canvas {
   padding: 16px 20px;
 }
 
+.panel-mission .panel-value {
+  margin-top: 8px;
+}
+
 .panel-right {
   display: grid;
   grid-template-columns: repeat(3, minmax(88px, 1fr));
@@ -171,6 +175,14 @@ canvas {
 
 .panel-value {
   font-size: clamp(1.15rem, 1vw + 0.95rem, 1.45rem);
+}
+
+.panel-copy {
+  margin: 10px 0 0;
+  max-width: 42ch;
+  color: rgba(244, 251, 255, 0.86);
+  font-size: 0.96rem;
+  line-height: 1.5;
 }
 
 .deck-card {

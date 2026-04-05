@@ -17,13 +17,21 @@ const LOOK_SENSITIVITY = {
   touchX: 0.0035,
   touchY: 0.0031,
 };
+const STAGE_OBJECTIVE_SITES = [
+  { label: "the north ring", position: new THREE.Vector3(0, 1.55, -18) },
+  { label: "the east relay", position: new THREE.Vector3(18, 1.55, -3) },
+  { label: "the south lane", position: new THREE.Vector3(2, 1.55, 18) },
+  { label: "the west tower", position: new THREE.Vector3(-18, 1.55, 3) },
+  { label: "the ember platform", position: new THREE.Vector3(13, 1.55, 13) },
+];
 
 const ui = {
   app: document.querySelector("#app"),
   score: document.querySelector("#score"),
-  wave: document.querySelector("#wave"),
+  stage: document.querySelector("#stage"),
   health: document.querySelector("#health"),
   status: document.querySelector("#status"),
+  objective: document.querySelector("#objective"),
   overlay: document.querySelector("#overlay"),
   overlayTitle: document.querySelector("#overlay-title"),
   overlayCopy: document.querySelector("#overlay-copy"),
@@ -105,12 +113,12 @@ const state = {
   isPointerLocked: false,
   health: 100,
   score: 0,
-  wave: 1,
+  stage: 1,
   fireCooldown: 0,
   verticalVelocity: 0,
   onGround: true,
   statusTimeout: 0,
-  waveTicket: 0,
+  stageTicket: 0,
   impacts: [],
   traces: [],
   recoil: 0,
@@ -119,6 +127,9 @@ const state = {
   lookSwayX: 0,
   lookSwayY: 0,
   jumpQueued: false,
+  objectiveActive: false,
+  objectiveCollected: false,
+  objectiveSiteIndex: 0,
 };
 
 const obstacles = [];
@@ -127,6 +138,7 @@ const worldEffects = [];
 
 buildWorld();
 const weapon = createWeapon();
+const stageGoal = createStageGoal();
 camera.add(weapon.group);
 resetRun();
 attachEvents();
@@ -267,6 +279,104 @@ function buildWorld() {
 
   shards.name = "sky-shards";
   scene.add(shards);
+}
+
+function createStageGoal() {
+  const group = new THREE.Group();
+  group.visible = false;
+  scene.add(group);
+
+  const starShape = new THREE.Shape();
+  const outerRadius = 0.8;
+  const innerRadius = 0.34;
+
+  for (let index = 0; index < 10; index += 1) {
+    const radius = index % 2 === 0 ? outerRadius : innerRadius;
+    const angle = -Math.PI / 2 + (index / 10) * Math.PI * 2;
+    const x = Math.cos(angle) * radius;
+    const y = Math.sin(angle) * radius;
+
+    if (index === 0) {
+      starShape.moveTo(x, y);
+    } else {
+      starShape.lineTo(x, y);
+    }
+  }
+
+  starShape.closePath();
+
+  const starMaterial = new THREE.MeshStandardMaterial({
+    color: 0xfff1a8,
+    emissive: 0xffbf47,
+    emissiveIntensity: 1.9,
+    roughness: 0.18,
+    metalness: 0.55,
+  });
+  const star = new THREE.Mesh(
+    new THREE.ExtrudeGeometry(starShape, {
+      depth: 0.22,
+      bevelEnabled: false,
+    }),
+    starMaterial,
+  );
+  star.geometry.center();
+  star.castShadow = true;
+  star.rotation.x = Math.PI * 0.12;
+  group.add(star);
+
+  const haloMaterial = new THREE.MeshBasicMaterial({
+    color: 0x9ef8ff,
+    transparent: true,
+    opacity: 0.58,
+    side: THREE.DoubleSide,
+  });
+  const halo = new THREE.Mesh(
+    new THREE.TorusGeometry(1.02, 0.08, 12, 42),
+    haloMaterial,
+  );
+  halo.rotation.x = Math.PI / 2;
+  group.add(halo);
+
+  const beamMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffd57b,
+    transparent: true,
+    opacity: 0.24,
+    side: THREE.DoubleSide,
+  });
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.22, 0.76, 6.8, 16, 1, true),
+    beamMaterial,
+  );
+  beam.position.y = 3.3;
+  group.add(beam);
+
+  const baseGlow = new THREE.Mesh(
+    new THREE.CircleGeometry(1.45, 36),
+    new THREE.MeshBasicMaterial({
+      color: 0x86f4ff,
+      transparent: true,
+      opacity: 0.18,
+    }),
+  );
+  baseGlow.rotation.x = -Math.PI / 2;
+  baseGlow.position.y = -1.48;
+  group.add(baseGlow);
+
+  const light = new THREE.PointLight(0xffd57b, 3.4, 11, 2);
+  light.position.set(0, 1.2, 0);
+  group.add(light);
+
+  return {
+    group,
+    star,
+    halo,
+    light,
+    beam,
+    starMaterial,
+    haloMaterial,
+    beamMaterial,
+    baseGlow,
+  };
 }
 
 function createWeapon() {
@@ -840,6 +950,54 @@ function queueJump() {
   state.jumpQueued = true;
 }
 
+function getStageSite(stage = state.stage) {
+  return STAGE_OBJECTIVE_SITES[(stage - 1) % STAGE_OBJECTIVE_SITES.length];
+}
+
+function getAliveEnemyCount() {
+  return enemies.reduce((count, enemy) => count + Number(enemy.alive), 0);
+}
+
+function getIdleStatusMessage() {
+  if (state.gameOver) {
+    return "Mission failed.";
+  }
+
+  if (state.objectiveActive) {
+    return `Stage ${state.stage} // Recover the star core`;
+  }
+
+  if (getAliveEnemyCount() > 0) {
+    return `Stage ${state.stage} // Arena sweep`;
+  }
+
+  return `Stage ${state.stage} // Objective exposed`;
+}
+
+function updateObjectiveText() {
+  const site = getStageSite();
+  const enemiesRemaining = getAliveEnemyCount();
+
+  if (state.gameOver) {
+    ui.objective.textContent = `Goal failed at stage ${state.stage}. Restart to recover the next star core.`;
+    return;
+  }
+
+  if (state.objectiveActive) {
+    ui.objective.textContent = `Goal: Find and collect the star core near ${site.label}.`;
+    return;
+  }
+
+  if (enemiesRemaining > 0) {
+    ui.objective.textContent = `Goal: Clear ${enemiesRemaining} ${
+      enemiesRemaining === 1 ? "drone" : "drones"
+    } to reveal the star core near ${site.label}.`;
+    return;
+  }
+
+  ui.objective.textContent = `Goal: The star core is online near ${site.label}. Move in and recover it.`;
+}
+
 function resetRun() {
   clearEnemies();
   clearTransientEffects();
@@ -849,7 +1007,7 @@ function resetRun() {
   state.gameOver = false;
   state.health = 100;
   state.score = 0;
-  state.wave = 1;
+  state.stage = 1;
   state.fireCooldown = 0;
   state.verticalVelocity = 0;
   state.onGround = true;
@@ -859,7 +1017,10 @@ function resetRun() {
   state.lookSwayX = 0;
   state.lookSwayY = 0;
   state.jumpQueued = false;
-  state.waveTicket += 1;
+  state.objectiveActive = false;
+  state.objectiveCollected = false;
+  stageGoal.group.visible = false;
+  state.stageTicket += 1;
 
   if (touchInput.enabled) {
     deactivateTouchSession(false);
@@ -869,16 +1030,13 @@ function resetRun() {
   player.rotation.set(0, 0, 0);
   pitch.rotation.set(0, 0, 0);
 
-  updateHud();
-  setStatus("Arena hot. Secure the sector.");
-
   ui.overlayTitle.textContent = "Neon Siege";
   ui.overlayCopy.textContent = touchInput.enabled
     ? "Play on iPhone or iPad with the touch HUD: left thumb to move, right thumb to aim, and the on-screen buttons to jump and fire."
-    : "Drop into the arena with a visible pulse rifle, clear incoming drones, and show that a browser-based first person shooter can be built from zero to live demo fast.";
+    : "Drop into the arena with a visible pulse rifle, clear incoming drones, then recover the glowing star core to finish each stage.";
   ui.startButton.textContent = touchInput.enabled ? "Start touch mission" : "Start mission";
 
-  spawnWave(state.wave);
+  startStage(1);
 }
 
 function clearEnemies() {
@@ -902,21 +1060,62 @@ function clearTransientEffects() {
   state.traces = [];
 }
 
-function spawnWave(wave) {
-  setStatus(`Wave ${wave} entering the grid.`);
-  updateHud();
+function startStage(stage) {
+  clearEnemies();
+  state.stage = stage;
+  state.stageTicket += 1;
+  state.objectiveSiteIndex = (stage - 1) % STAGE_OBJECTIVE_SITES.length;
+  state.objectiveActive = false;
+  state.objectiveCollected = false;
+  stageGoal.group.visible = false;
+  stageGoal.group.position.copy(getStageSite(stage).position);
 
-  const count = 3 + wave * 2;
+  const count = 3 + stage * 2;
   for (let index = 0; index < count; index += 1) {
-    spawnEnemy(wave);
+    spawnEnemy(stage);
   }
+
+  updateHud();
+  setStatus(`Stage ${stage} deployed. Sweep the arena.`, 1200);
 }
 
-function spawnEnemy(wave) {
+function revealStageGoal() {
+  if (state.gameOver || state.objectiveActive || state.objectiveCollected) {
+    return;
+  }
+
+  const site = getStageSite();
+  state.objectiveActive = true;
+  stageGoal.group.visible = true;
+  updateHud();
+  setStatus(`Star core detected near ${site.label}.`, 1500);
+}
+
+function collectStageGoal() {
+  if (!state.objectiveActive || state.objectiveCollected || state.gameOver) {
+    return;
+  }
+
+  state.objectiveCollected = true;
+  state.objectiveActive = false;
+  stageGoal.group.visible = false;
+  state.score += 250;
+  updateHud();
+  setStatus(`Star core secured. Stage ${state.stage + 1} unlocking.`, 1400);
+
+  const currentTicket = state.stageTicket;
+  window.setTimeout(() => {
+    if (!state.gameOver && currentTicket === state.stageTicket) {
+      startStage(state.stage + 1);
+    }
+  }, 900);
+}
+
+function spawnEnemy(stage) {
   const material = new THREE.MeshStandardMaterial({
-    color: wave > 3 ? 0xff9a74 : 0xff6f53,
-    emissive: wave > 3 ? 0xa63b14 : 0x7a1f0a,
-    emissiveIntensity: 1.5 + wave * 0.05,
+    color: stage > 3 ? 0xff9a74 : 0xff6f53,
+    emissive: stage > 3 ? 0xa63b14 : 0x7a1f0a,
+    emissiveIntensity: 1.5 + stage * 0.05,
     roughness: 0.32,
     metalness: 0.3,
   });
@@ -946,7 +1145,7 @@ function spawnEnemy(wave) {
 
   enemies.push({
     mesh,
-    speed: THREE.MathUtils.randFloat(1.8, 2.7) + wave * 0.12,
+    speed: THREE.MathUtils.randFloat(1.8, 2.7) + stage * 0.12,
     bobSpeed: THREE.MathUtils.randFloat(3, 5.2),
     bobOffset: Math.random() * Math.PI * 2,
     baseY: spawnPoint.y,
@@ -1032,13 +1231,12 @@ function fire() {
   updateHud();
 
   if (enemies.every((enemy) => !enemy.alive)) {
-    const currentTicket = state.waveTicket;
+    const currentTicket = state.stageTicket;
     window.setTimeout(() => {
-      if (!state.gameOver && currentTicket === state.waveTicket) {
-        state.wave += 1;
-        spawnWave(state.wave);
+      if (!state.gameOver && currentTicket === state.stageTicket) {
+        revealStageGoal();
       }
-    }, 900);
+    }, 650);
   }
 }
 
@@ -1092,9 +1290,10 @@ function createImpact(position) {
 
 function updateHud() {
   ui.score.textContent = String(state.score);
-  ui.wave.textContent = String(state.wave);
+  ui.stage.textContent = String(state.stage);
   ui.health.textContent = String(Math.max(0, Math.round(state.health)));
   ui.health.style.color = state.health <= 35 ? "#ff6f61" : "#ffd166";
+  updateObjectiveText();
 }
 
 function setStatus(message, timeoutMs = 0) {
@@ -1107,7 +1306,7 @@ function setStatus(message, timeoutMs = 0) {
 
   if (timeoutMs > 0) {
     state.statusTimeout = window.setTimeout(() => {
-      ui.status.textContent = "Arena hot. Secure the sector.";
+      ui.status.textContent = getIdleStatusMessage();
     }, timeoutMs);
   }
 }
@@ -1143,6 +1342,7 @@ function animate() {
     }
   }
 
+  updateStageGoal(delta);
   updateWeapon(delta);
   updateImpacts(delta);
   updateTraces(delta);
@@ -1270,6 +1470,27 @@ function updateEnemies(delta) {
   }
 }
 
+function updateStageGoal(delta) {
+  if (!stageGoal.group.visible) {
+    return;
+  }
+
+  const elapsed = clock.elapsedTime;
+  stageGoal.group.rotation.y += delta * 1.35;
+  stageGoal.star.rotation.z += delta * 1.8;
+  stageGoal.star.position.y = Math.sin(elapsed * 2.8) * 0.12;
+  stageGoal.halo.scale.setScalar(1 + Math.sin(elapsed * 3.2) * 0.08);
+  stageGoal.haloMaterial.opacity = 0.42 + Math.sin(elapsed * 4.4) * 0.12;
+  stageGoal.beamMaterial.opacity = 0.18 + Math.sin(elapsed * 2.4) * 0.06;
+  stageGoal.baseGlow.scale.setScalar(1 + Math.sin(elapsed * 3.6) * 0.1);
+  stageGoal.light.intensity = 3.1 + Math.sin(elapsed * 5.2) * 0.45;
+  stageGoal.starMaterial.emissiveIntensity = 1.75 + Math.sin(elapsed * 5.2) * 0.3;
+
+  if (player.position.distanceTo(stageGoal.group.position) < 2.1) {
+    collectStageGoal();
+  }
+}
+
 function updateWeapon(delta) {
   const moving =
     Number(keys.forward || keys.backward || keys.left || keys.right) +
@@ -1319,6 +1540,8 @@ function takeDamage(amount) {
 
 function endRun() {
   state.gameOver = true;
+  state.objectiveActive = false;
+  stageGoal.group.visible = false;
   if (document.exitPointerLock) {
     document.exitPointerLock();
   }
@@ -1329,9 +1552,10 @@ function endRun() {
   ui.overlay.classList.remove("hidden");
   ui.overlayTitle.textContent = "Mission failed";
   ui.overlayCopy.textContent = touchInput.enabled
-    ? `You reached wave ${state.wave} with ${state.score} points. Tap restart and jump back in with the touch HUD.`
-    : `You reached wave ${state.wave} with ${state.score} points. Lock the pointer to redeploy the VX-9 and restart the arena.`;
+    ? `You reached stage ${state.stage} with ${state.score} points. Tap restart and jump back in with the touch HUD.`
+    : `You reached stage ${state.stage} with ${state.score} points. Lock the pointer to redeploy the VX-9 and restart the arena.`;
   ui.startButton.textContent = touchInput.enabled ? "Restart touch mission" : "Restart mission";
+  updateHud();
 }
 
 function updateImpacts(delta) {
