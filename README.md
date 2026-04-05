@@ -6,8 +6,11 @@ A lightweight first-person shooter demo for the browser, built from scratch with
 
 - First person mouse look with pointer lock
 - WASD movement and jumping
-- Click-to-shoot enemy drones
-- Wave progression, health, score, and HUD
+- Touch HUD for iPhone and iPad
+- Click-to-shoot enemy drones with visible weapon feedback
+- Stage progression with star-core objectives
+- Minimap guidance for player position, enemies, obstacles, and the next objective
+- Health, score, and HUD
 - Zero backend required, which makes it easy to deploy on Vercel
 
 ## Run locally
@@ -29,6 +32,16 @@ npm run build
 - `Mouse`: look around
 - `Space`: jump
 - `Left click`: shoot
+- `iPhone/iPad`: left thumb move, right thumb aim, on-screen jump/fire buttons
+
+## Objective Loop
+
+Each stage has a clear goal:
+
+1. Clear the drones in the arena.
+2. Reveal the glowing star core.
+3. Use the minimap to find and collect it.
+4. Unlock the next stage.
 
 ## Deploy on Vercel
 

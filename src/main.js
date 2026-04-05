@@ -9,8 +9,16 @@ const JUMP_VELOCITY = 8.8;
 const MOVE_SPEED = 8.5;
 const FIRE_COOLDOWN = 0.18;
 const TRACE_FADE_SPEED = 7.5;
+const ENEMY_RADIUS = 0.72;
 const searchParams = new URLSearchParams(window.location.search);
 const FORCE_TOUCH = searchParams.get("touch") === "1";
+const HAS_FINE_POINTER =
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(any-pointer: fine)").matches;
+const HAS_COARSE_POINTER =
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(any-pointer: coarse)").matches;
+const HAS_TOUCH_POINTS = navigator.maxTouchPoints > 0;
 const LOOK_SENSITIVITY = {
   mouseX: 0.0022,
   mouseY: 0.0019,
@@ -118,10 +126,7 @@ const keys = {
 
 const touchInput = {
   enabled:
-    FORCE_TOUCH ||
-    (typeof window.matchMedia === "function" &&
-      window.matchMedia("(pointer: coarse)").matches) ||
-    navigator.maxTouchPoints > 0,
+    FORCE_TOUCH || ((HAS_COARSE_POINTER || HAS_TOUCH_POINTS) && !HAS_FINE_POINTER),
   sessionActive: false,
   moveTouchId: null,
   lookTouchId: null,
@@ -160,6 +165,8 @@ const state = {
 const obstacles = [];
 const enemies = [];
 const worldEffects = [];
+const navigationColliders = [];
+const worldRaycastTargets = [];
 const minimapWalls = [];
 const minimap = {
   canvas: ui.minimap,
@@ -170,6 +177,7 @@ const minimap = {
   dpr: 1,
   padding: 14,
 };
+let skyShards = null;
 
 buildWorld();
 const weapon = createWeapon();
@@ -213,6 +221,7 @@ function buildWorld() {
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
+  worldRaycastTargets.push(floor);
 
   const grid = new THREE.GridHelper(72, 72, 0x72f0ff, 0x1c4362);
   grid.position.y = 0.02;
@@ -277,6 +286,13 @@ function buildWorld() {
   backPillar.castShadow = true;
   backPillar.receiveShadow = true;
   scene.add(backPillar);
+  worldRaycastTargets.push(backPillar);
+  navigationColliders.push({
+    minX: -3.35,
+    maxX: 3.35,
+    minZ: -17.35,
+    maxZ: -10.65,
+  });
 
   createPerimeterWall(0, 2.5, -ARENA_HALF_SIZE - 0.5, 52, 5, 1.2);
   createPerimeterWall(0, 2.5, ARENA_HALF_SIZE + 0.5, 52, 5, 1.2);
@@ -294,7 +310,7 @@ function buildWorld() {
   createObstacle(10, 1.8, -9, 5.4, 3.6, 3.2, 0x173046);
   createObstacle(-14, 1.4, 9, 3.6, 2.8, 5.8, 0x153042);
 
-  const shards = new THREE.Group();
+  skyShards = new THREE.Group();
   const shardGeometry = new THREE.OctahedronGeometry(0.36, 0);
   const shardMaterial = new THREE.MeshStandardMaterial({
     color: 0x9af6ff,
@@ -317,11 +333,11 @@ function buildWorld() {
       Math.random() * Math.PI,
     );
     shard.scale.setScalar(THREE.MathUtils.randFloat(0.7, 1.8));
-    shards.add(shard);
+    skyShards.add(shard);
   }
 
-  shards.name = "sky-shards";
-  scene.add(shards);
+  skyShards.name = "sky-shards";
+  scene.add(skyShards);
 }
 
 function createStageGoal() {
@@ -609,6 +625,7 @@ function createPerimeterWall(x, y, z, width, height, depth) {
   mesh.receiveShadow = true;
   mesh.castShadow = true;
   scene.add(mesh);
+  worldRaycastTargets.push(mesh);
 
   const trimColor = depth > width ? 0x5ae5ff : 0xff8b62;
   const trim = new THREE.Mesh(
@@ -634,6 +651,12 @@ function createPerimeterWall(x, y, z, width, height, depth) {
   });
 
   minimapWalls.push({
+    minX: x - width / 2,
+    maxX: x + width / 2,
+    minZ: z - depth / 2,
+    maxZ: z + depth / 2,
+  });
+  navigationColliders.push({
     minX: x - width / 2,
     maxX: x + width / 2,
     minZ: z - depth / 2,
@@ -699,6 +722,7 @@ function createObstacle(x, y, z, width, height, depth, color) {
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   scene.add(mesh);
+  worldRaycastTargets.push(mesh);
 
   const topAccent = new THREE.Mesh(
     new THREE.BoxGeometry(width * 0.6, 0.12, depth * 0.18),
@@ -717,12 +741,14 @@ function createObstacle(x, y, z, width, height, depth, color) {
     topAccent.material.emissiveIntensity = 1 + Math.sin(elapsed * 1.7 + x) * 0.35;
   });
 
-  obstacles.push({
+  const collider = {
     minX: x - width / 2,
     maxX: x + width / 2,
     minZ: z - depth / 2,
     maxZ: z + depth / 2,
-  });
+  };
+  obstacles.push(collider);
+  navigationColliders.push(collider);
 }
 
 function attachEvents() {
@@ -1062,6 +1088,28 @@ function updateObjectiveText() {
   ui.objective.textContent = `Goal: The star core is online near ${site.label}. Move in and recover it.`;
 }
 
+function disposeMaterial(material) {
+  if (Array.isArray(material)) {
+    for (const entry of material) {
+      entry.dispose?.();
+    }
+    return;
+  }
+
+  material?.dispose?.();
+}
+
+function disposeObject3D(object) {
+  if (!object) {
+    return;
+  }
+
+  object.traverse((child) => {
+    child.geometry?.dispose?.();
+    disposeMaterial(child.material);
+  });
+}
+
 function resetRun() {
   clearEnemies();
   clearTransientEffects();
@@ -1105,7 +1153,13 @@ function resetRun() {
 
 function clearEnemies() {
   for (const enemy of enemies) {
+    if (!enemy.mesh) {
+      continue;
+    }
+
     scene.remove(enemy.mesh);
+    disposeObject3D(enemy.mesh);
+    enemy.mesh = null;
   }
 
   enemies.length = 0;
@@ -1114,10 +1168,12 @@ function clearEnemies() {
 function clearTransientEffects() {
   for (const impact of state.impacts) {
     scene.remove(impact.mesh);
+    disposeObject3D(impact.mesh);
   }
 
   for (const trace of state.traces) {
     scene.remove(trace.mesh);
+    disposeObject3D(trace.mesh);
   }
 
   state.impacts = [];
@@ -1207,48 +1263,75 @@ function spawnEnemy(stage) {
   mesh.position.copy(spawnPoint);
   scene.add(mesh);
 
-  enemies.push({
+  const enemy = {
     mesh,
     speed: THREE.MathUtils.randFloat(1.8, 2.7) + stage * 0.12,
     bobSpeed: THREE.MathUtils.randFloat(3, 5.2),
     bobOffset: Math.random() * Math.PI * 2,
     baseY: spawnPoint.y,
     alive: true,
-  });
+  };
+  mesh.userData.enemyRef = enemy;
+  eye.userData.enemyRef = enemy;
+  enemies.push(enemy);
 }
 
 function randomSpawnPoint() {
   const candidate = new THREE.Vector3();
-  let valid = false;
 
-  while (!valid) {
+  for (let attempts = 0; attempts < 80; attempts += 1) {
     candidate.set(
       THREE.MathUtils.randFloatSpread(ARENA_HALF_SIZE * 1.8),
       THREE.MathUtils.randFloat(1.2, 2.3),
       THREE.MathUtils.randFloat(-ARENA_HALF_SIZE + 3, ARENA_HALF_SIZE - 3),
     );
 
-    const playerDistance = tempVector
-      .set(candidate.x - player.position.x, 0, candidate.z - player.position.z)
-      .length();
-
-    valid =
-      playerDistance > 10 &&
-      Math.abs(candidate.x) < ARENA_HALF_SIZE - 2 &&
-      Math.abs(candidate.z) < ARENA_HALF_SIZE - 2 &&
-      !obstacles.some((obstacle) => pointInsideObstacle(candidate, obstacle, 1.8));
+    if (isValidSpawnPoint(candidate, 1.8)) {
+      return candidate.clone();
+    }
   }
 
-  return candidate;
+  return findFallbackSpawnPoint();
 }
 
-function pointInsideObstacle(point, obstacle, padding = 0) {
+function isValidSpawnPoint(candidate, clearance = 1.8) {
+  const playerDistance = tempVector
+    .set(candidate.x - player.position.x, 0, candidate.z - player.position.z)
+    .length();
+
   return (
-    point.x > obstacle.minX - padding &&
-    point.x < obstacle.maxX + padding &&
-    point.z > obstacle.minZ - padding &&
-    point.z < obstacle.maxZ + padding
+    playerDistance > 10 &&
+    Math.abs(candidate.x) < ARENA_HALF_SIZE - 2 &&
+    Math.abs(candidate.z) < ARENA_HALF_SIZE - 2 &&
+    !collidesWithColliders(candidate.x, candidate.z, clearance)
   );
+}
+
+function findFallbackSpawnPoint() {
+  const candidate = new THREE.Vector3();
+  let bestCandidate = null;
+  let bestDistance = -Infinity;
+
+  for (let x = -18; x <= 18; x += 6) {
+    for (let z = -18; z <= 18; z += 6) {
+      candidate.set(x, 1.7, z);
+      if (!isValidSpawnPoint(candidate, 1.8)) {
+        continue;
+      }
+
+      const distance = candidate.distanceTo(player.position);
+      if (distance > bestDistance) {
+        bestDistance = distance;
+        bestCandidate = candidate.clone();
+      }
+    }
+  }
+
+  if (bestCandidate) {
+    return bestCandidate;
+  }
+
+  return new THREE.Vector3(0, 1.7, -18);
 }
 
 function fire() {
@@ -1266,10 +1349,13 @@ function fire() {
   raycaster.setFromCamera(mouseCenter, camera);
 
   const aliveTargets = enemies
-    .filter((enemy) => enemy.alive)
+    .filter((enemy) => enemy.alive && enemy.mesh)
     .map((enemy) => enemy.mesh);
 
-  const intersections = raycaster.intersectObjects(aliveTargets, false);
+  const intersections = raycaster.intersectObjects(
+    [...aliveTargets, ...worldRaycastTargets],
+    true,
+  );
   const firstHit = intersections.at(0);
 
   if (!firstHit) {
@@ -1281,8 +1367,11 @@ function fire() {
     return;
   }
 
-  const target = enemies.find((enemy) => enemy.mesh === firstHit.object);
-  if (!target) {
+  const target = firstHit.object.userData.enemyRef;
+  if (!target || !target.alive) {
+    createTracer(firstHit.point, false);
+    createImpact(firstHit.point);
+    setStatus("Shot blocked by cover.", 700);
     return;
   }
 
@@ -1292,6 +1381,8 @@ function fire() {
   createImpact(firstHit.point);
   setStatus("Direct hit. Drone neutralized.", 850);
   scene.remove(target.mesh);
+  disposeObject3D(target.mesh);
+  target.mesh = null;
   updateHud();
 
   if (enemies.every((enemy) => !enemy.alive)) {
@@ -1389,7 +1480,6 @@ function onResize() {
 
 function animate() {
   const delta = Math.min(clock.getDelta(), 0.033);
-  const skyShards = scene.getObjectByName("sky-shards");
 
   if (skyShards) {
     skyShards.rotation.y += delta * 0.05;
@@ -1479,7 +1569,7 @@ function movePlayer(offsetX, offsetZ) {
     ARENA_HALF_SIZE - PLAYER_RADIUS,
   );
 
-  if (!collidesWithObstacles(proposedX, player.position.z)) {
+  if (!collidesWithColliders(proposedX, player.position.z, PLAYER_RADIUS)) {
     player.position.x = proposedX;
   }
 
@@ -1489,38 +1579,39 @@ function movePlayer(offsetX, offsetZ) {
     ARENA_HALF_SIZE - PLAYER_RADIUS,
   );
 
-  if (!collidesWithObstacles(player.position.x, proposedZ)) {
+  if (!collidesWithColliders(player.position.x, proposedZ, PLAYER_RADIUS)) {
     player.position.z = proposedZ;
   }
 }
 
-function collidesWithObstacles(x, z) {
-  return obstacles.some((obstacle) => {
-    const nearestX = THREE.MathUtils.clamp(x, obstacle.minX, obstacle.maxX);
-    const nearestZ = THREE.MathUtils.clamp(z, obstacle.minZ, obstacle.maxZ);
+function collidesWithColliders(x, z, radius) {
+  return navigationColliders.some((collider) => {
+    const nearestX = THREE.MathUtils.clamp(x, collider.minX, collider.maxX);
+    const nearestZ = THREE.MathUtils.clamp(z, collider.minZ, collider.maxZ);
     const dx = x - nearestX;
     const dz = z - nearestZ;
 
-    return dx * dx + dz * dz < PLAYER_RADIUS * PLAYER_RADIUS;
+    return dx * dx + dz * dz < radius * radius;
   });
 }
 
 function updateEnemies(delta) {
   for (const enemy of enemies) {
-    if (!enemy.alive) {
+    if (!enemy.alive || !enemy.mesh) {
       continue;
     }
 
-    tempVector
-      .set(
-        player.position.x - enemy.mesh.position.x,
-        0,
-        player.position.z - enemy.mesh.position.z,
-      )
-      .normalize();
+    tempVector.set(
+      player.position.x - enemy.mesh.position.x,
+      0,
+      player.position.z - enemy.mesh.position.z,
+    );
 
-    enemy.mesh.position.x += tempVector.x * enemy.speed * delta;
-    enemy.mesh.position.z += tempVector.z * enemy.speed * delta;
+    if (tempVector.lengthSq() > 0.0001) {
+      tempVector.normalize().multiplyScalar(enemy.speed * delta);
+      moveEnemy(enemy, tempVector.x, tempVector.z);
+    }
+
     enemy.mesh.position.y =
       enemy.baseY +
       Math.sin(clock.elapsedTime * enemy.bobSpeed + enemy.bobOffset) * 0.18;
@@ -1534,6 +1625,28 @@ function updateEnemies(delta) {
     if (distance < 1.7) {
       takeDamage(18 * delta);
     }
+  }
+}
+
+function moveEnemy(enemy, offsetX, offsetZ) {
+  const proposedX = THREE.MathUtils.clamp(
+    enemy.mesh.position.x + offsetX,
+    -ARENA_HALF_SIZE + ENEMY_RADIUS,
+    ARENA_HALF_SIZE - ENEMY_RADIUS,
+  );
+
+  if (!collidesWithColliders(proposedX, enemy.mesh.position.z, ENEMY_RADIUS)) {
+    enemy.mesh.position.x = proposedX;
+  }
+
+  const proposedZ = THREE.MathUtils.clamp(
+    enemy.mesh.position.z + offsetZ,
+    -ARENA_HALF_SIZE + ENEMY_RADIUS,
+    ARENA_HALF_SIZE - ENEMY_RADIUS,
+  );
+
+  if (!collidesWithColliders(enemy.mesh.position.x, proposedZ, ENEMY_RADIUS)) {
+    enemy.mesh.position.z = proposedZ;
   }
 }
 
