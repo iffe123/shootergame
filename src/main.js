@@ -9,6 +9,14 @@ const JUMP_VELOCITY = 8.8;
 const MOVE_SPEED = 8.5;
 const FIRE_COOLDOWN = 0.18;
 const TRACE_FADE_SPEED = 7.5;
+const searchParams = new URLSearchParams(window.location.search);
+const FORCE_TOUCH = searchParams.get("touch") === "1";
+const LOOK_SENSITIVITY = {
+  mouseX: 0.0022,
+  mouseY: 0.0019,
+  touchX: 0.0035,
+  touchY: 0.0031,
+};
 
 const ui = {
   app: document.querySelector("#app"),
@@ -21,6 +29,12 @@ const ui = {
   overlayCopy: document.querySelector("#overlay-copy"),
   startButton: document.querySelector("#start-button"),
   crosshair: document.querySelector(".crosshair"),
+  mobileUi: document.querySelector("#mobile-ui"),
+  moveStick: document.querySelector("#move-stick"),
+  moveThumb: document.querySelector("#move-thumb"),
+  lookZone: document.querySelector("#look-zone"),
+  fireButton: document.querySelector("#fire-button"),
+  jumpButton: document.querySelector("#jump-button"),
 };
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -69,6 +83,22 @@ const keys = {
   jump: false,
 };
 
+const touchInput = {
+  enabled:
+    FORCE_TOUCH ||
+    (typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches) ||
+    navigator.maxTouchPoints > 0,
+  sessionActive: false,
+  moveTouchId: null,
+  lookTouchId: null,
+  moveX: 0,
+  moveY: 0,
+  lastLookX: 0,
+  lastLookY: 0,
+  fireHeld: false,
+};
+
 const state = {
   started: false,
   gameOver: false,
@@ -88,6 +118,7 @@ const state = {
   walkPhase: 0,
   lookSwayX: 0,
   lookSwayY: 0,
+  jumpQueued: false,
 };
 
 const obstacles = [];
@@ -537,11 +568,21 @@ function attachEvents() {
       resetRun();
     }
 
-    renderer.domElement.requestPointerLock();
+    if (touchInput.enabled) {
+      activateTouchSession();
+      return;
+    }
+
+    renderer.domElement.requestPointerLock?.();
   });
 
   document.addEventListener("pointerlockchange", () => {
     state.isPointerLocked = document.pointerLockElement === renderer.domElement;
+
+    if (touchInput.enabled) {
+      return;
+    }
+
     ui.crosshair.classList.toggle("active", state.isPointerLocked);
     ui.overlay.classList.toggle("hidden", state.isPointerLocked);
 
@@ -558,16 +599,12 @@ function attachEvents() {
       return;
     }
 
-    player.rotation.y -= event.movementX * 0.0022;
-    pitch.rotation.x -= event.movementY * 0.0019;
-    pitch.rotation.x = THREE.MathUtils.clamp(
-      pitch.rotation.x,
-      -Math.PI / 2.1,
-      Math.PI / 2.35,
+    applyLookDelta(
+      event.movementX,
+      event.movementY,
+      LOOK_SENSITIVITY.mouseX,
+      LOOK_SENSITIVITY.mouseY,
     );
-
-    state.lookSwayX = THREE.MathUtils.clamp(event.movementX * 0.0009, -0.035, 0.035);
-    state.lookSwayY = THREE.MathUtils.clamp(event.movementY * 0.0008, -0.03, 0.03);
   });
 
   window.addEventListener("mousedown", (event) => {
@@ -596,12 +633,217 @@ function attachEvents() {
     if (event.code === "Space") keys.jump = false;
   });
 
+  if (touchInput.enabled) {
+    attachTouchControls();
+  }
+
   window.addEventListener("resize", onResize);
+}
+
+function attachTouchControls() {
+  const touchOptions = { passive: false };
+
+  ui.mobileUi.classList.remove("is-visible");
+  ui.mobileUi.setAttribute("aria-hidden", "true");
+
+  ui.moveStick.addEventListener("touchstart", handleMoveTouchStart, touchOptions);
+  ui.lookZone.addEventListener("touchstart", handleLookTouchStart, touchOptions);
+  ui.fireButton.addEventListener("touchstart", handleFireTouchStart, touchOptions);
+  ui.fireButton.addEventListener("touchend", handleFireTouchEnd, touchOptions);
+  ui.fireButton.addEventListener("touchcancel", handleFireTouchEnd, touchOptions);
+  ui.jumpButton.addEventListener("touchstart", handleJumpTouchStart, touchOptions);
+  ui.jumpButton.addEventListener("touchend", swallowTouch, touchOptions);
+  ui.jumpButton.addEventListener("touchcancel", swallowTouch, touchOptions);
+  window.addEventListener("touchmove", handleGlobalTouchMove, touchOptions);
+  window.addEventListener("touchend", handleGlobalTouchEnd, touchOptions);
+  window.addEventListener("touchcancel", handleGlobalTouchEnd, touchOptions);
+}
+
+function handleMoveTouchStart(event) {
+  if (touchInput.moveTouchId !== null) {
+    return;
+  }
+
+  const touch = event.changedTouches[0];
+  if (!touch) {
+    return;
+  }
+
+  touchInput.moveTouchId = touch.identifier;
+  updateJoystickFromTouch(touch);
+  event.preventDefault();
+}
+
+function handleLookTouchStart(event) {
+  if (touchInput.lookTouchId !== null) {
+    return;
+  }
+
+  const touch = event.changedTouches[0];
+  if (!touch) {
+    return;
+  }
+
+  touchInput.lookTouchId = touch.identifier;
+  touchInput.lastLookX = touch.clientX;
+  touchInput.lastLookY = touch.clientY;
+  event.preventDefault();
+}
+
+function handleGlobalTouchMove(event) {
+  let handled = false;
+
+  for (const touch of event.changedTouches) {
+    if (touch.identifier === touchInput.moveTouchId) {
+      updateJoystickFromTouch(touch);
+      handled = true;
+    }
+
+    if (touch.identifier === touchInput.lookTouchId) {
+      const deltaX = touch.clientX - touchInput.lastLookX;
+      const deltaY = touch.clientY - touchInput.lastLookY;
+      touchInput.lastLookX = touch.clientX;
+      touchInput.lastLookY = touch.clientY;
+      applyLookDelta(
+        deltaX,
+        deltaY,
+        LOOK_SENSITIVITY.touchX,
+        LOOK_SENSITIVITY.touchY,
+      );
+      handled = true;
+    }
+  }
+
+  if (handled) {
+    event.preventDefault();
+  }
+}
+
+function handleGlobalTouchEnd(event) {
+  let handled = false;
+
+  for (const touch of event.changedTouches) {
+    if (touch.identifier === touchInput.moveTouchId) {
+      touchInput.moveTouchId = null;
+      touchInput.moveX = 0;
+      touchInput.moveY = 0;
+      ui.moveThumb.style.transform = "translate(-50%, -50%)";
+      handled = true;
+    }
+
+    if (touch.identifier === touchInput.lookTouchId) {
+      touchInput.lookTouchId = null;
+      handled = true;
+    }
+  }
+
+  if (handled) {
+    event.preventDefault();
+  }
+}
+
+function handleFireTouchStart(event) {
+  touchInput.fireHeld = true;
+  fire();
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function handleFireTouchEnd(event) {
+  touchInput.fireHeld = false;
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function handleJumpTouchStart(event) {
+  queueJump();
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function swallowTouch(event) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function activateTouchSession() {
+  touchInput.sessionActive = true;
+  ui.mobileUi.classList.add("is-visible");
+  ui.mobileUi.setAttribute("aria-hidden", "false");
+  ui.overlay.classList.add("hidden");
+  ui.crosshair.classList.add("active");
+  setStatus("Touch controls live. Left thumb move, right thumb aim.", 1400);
+}
+
+function deactivateTouchSession(showOverlay = false) {
+  touchInput.sessionActive = false;
+  resetTouchInputState();
+  ui.mobileUi.classList.remove("is-visible");
+  ui.mobileUi.setAttribute("aria-hidden", "true");
+
+  if (!state.isPointerLocked) {
+    ui.crosshair.classList.remove("active");
+  }
+
+  if (showOverlay) {
+    ui.overlay.classList.remove("hidden");
+  }
+}
+
+function resetTouchInputState() {
+  touchInput.moveTouchId = null;
+  touchInput.lookTouchId = null;
+  touchInput.moveX = 0;
+  touchInput.moveY = 0;
+  touchInput.lastLookX = 0;
+  touchInput.lastLookY = 0;
+  touchInput.fireHeld = false;
+  ui.moveThumb.style.transform = "translate(-50%, -50%)";
+}
+
+function updateJoystickFromTouch(touch) {
+  const rect = ui.moveStick.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const radius = rect.width * 0.28;
+  const rawX = touch.clientX - centerX;
+  const rawY = touch.clientY - centerY;
+  const distance = Math.hypot(rawX, rawY);
+  const scale = distance > radius ? radius / distance : 1;
+  const clampedX = rawX * scale;
+  const clampedY = rawY * scale;
+
+  touchInput.moveX = clampedX / radius;
+  touchInput.moveY = clampedY / radius;
+
+  ui.moveThumb.style.transform = `translate(calc(-50% + ${clampedX}px), calc(-50% + ${clampedY}px))`;
+}
+
+function applyLookDelta(deltaX, deltaY, sensitivityX, sensitivityY) {
+  player.rotation.y -= deltaX * sensitivityX;
+  pitch.rotation.x -= deltaY * sensitivityY;
+  pitch.rotation.x = THREE.MathUtils.clamp(
+    pitch.rotation.x,
+    -Math.PI / 2.1,
+    Math.PI / 2.35,
+  );
+
+  state.lookSwayX = THREE.MathUtils.clamp(deltaX * 0.0009, -0.035, 0.035);
+  state.lookSwayY = THREE.MathUtils.clamp(deltaY * 0.0008, -0.03, 0.03);
+}
+
+function controlsAreActive() {
+  return state.isPointerLocked || touchInput.sessionActive;
+}
+
+function queueJump() {
+  state.jumpQueued = true;
 }
 
 function resetRun() {
   clearEnemies();
   clearTransientEffects();
+  resetTouchInputState();
 
   state.started = true;
   state.gameOver = false;
@@ -616,7 +858,12 @@ function resetRun() {
   state.walkPhase = 0;
   state.lookSwayX = 0;
   state.lookSwayY = 0;
+  state.jumpQueued = false;
   state.waveTicket += 1;
+
+  if (touchInput.enabled) {
+    deactivateTouchSession(false);
+  }
 
   player.position.set(0, PLAYER_HEIGHT, 14);
   player.rotation.set(0, 0, 0);
@@ -626,9 +873,10 @@ function resetRun() {
   setStatus("Arena hot. Secure the sector.");
 
   ui.overlayTitle.textContent = "Neon Siege";
-  ui.overlayCopy.textContent =
-    "Drop into the arena with a visible pulse rifle, clear incoming drones, and show that a browser-based first person shooter can be built from zero to live demo fast.";
-  ui.startButton.textContent = "Start mission";
+  ui.overlayCopy.textContent = touchInput.enabled
+    ? "Play on iPhone or iPad with the touch HUD: left thumb to move, right thumb to aim, and the on-screen buttons to jump and fire."
+    : "Drop into the arena with a visible pulse rifle, clear incoming drones, and show that a browser-based first person shooter can be built from zero to live demo fast.";
+  ui.startButton.textContent = touchInput.enabled ? "Start touch mission" : "Start mission";
 
   spawnWave(state.wave);
 }
@@ -741,7 +989,7 @@ function pointInsideObstacle(point, obstacle, padding = 0) {
 }
 
 function fire() {
-  if (!state.isPointerLocked || state.gameOver || state.fireCooldown > 0) {
+  if (!controlsAreActive() || state.gameOver || state.fireCooldown > 0) {
     return;
   }
 
@@ -868,6 +1116,10 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+
+  if (touchInput.moveTouchId === null) {
+    ui.moveThumb.style.transform = "translate(-50%, -50%)";
+  }
 }
 
 function animate() {
@@ -882,9 +1134,13 @@ function animate() {
 
   state.fireCooldown = Math.max(0, state.fireCooldown - delta);
 
-  if (state.isPointerLocked && !state.gameOver) {
+  if (controlsAreActive() && !state.gameOver) {
     updateMovement(delta);
     updateEnemies(delta);
+
+    if (touchInput.fireHeld) {
+      fire();
+    }
   }
 
   updateWeapon(delta);
@@ -915,6 +1171,14 @@ function updateMovement(delta) {
   if (keys.right) tempVector.add(moveRight);
   if (keys.left) tempVector.sub(moveRight);
 
+  if (Math.abs(touchInput.moveY) > 0.05) {
+    tempVector.addScaledVector(moveForward, -touchInput.moveY);
+  }
+
+  if (Math.abs(touchInput.moveX) > 0.05) {
+    tempVector.addScaledVector(moveRight, touchInput.moveX);
+  }
+
   const isMoving = tempVector.lengthSq() > 0;
 
   if (isMoving) {
@@ -925,11 +1189,12 @@ function updateMovement(delta) {
     state.walkPhase += delta * 2.2;
   }
 
-  if (keys.jump && state.onGround) {
+  if ((keys.jump || state.jumpQueued) && state.onGround) {
     state.verticalVelocity = JUMP_VELOCITY;
     state.onGround = false;
   }
 
+  state.jumpQueued = false;
   state.verticalVelocity -= GRAVITY * delta;
   player.position.y += state.verticalVelocity * delta;
 
@@ -1006,9 +1271,11 @@ function updateEnemies(delta) {
 }
 
 function updateWeapon(delta) {
-  const moving = Number(keys.forward || keys.backward || keys.left || keys.right);
-  const bobX = Math.sin(state.walkPhase) * 0.02 * moving;
-  const bobY = Math.abs(Math.cos(state.walkPhase * 2)) * 0.016 * moving;
+  const moving =
+    Number(keys.forward || keys.backward || keys.left || keys.right) +
+    Number(Math.abs(touchInput.moveX) > 0.05 || Math.abs(touchInput.moveY) > 0.05);
+  const bobX = Math.sin(state.walkPhase) * 0.02 * Math.min(moving, 1);
+  const bobY = Math.abs(Math.cos(state.walkPhase * 2)) * 0.016 * Math.min(moving, 1);
 
   state.recoil = smoothTo(state.recoil, 0, delta, 10);
   state.muzzleFlash = smoothTo(state.muzzleFlash, 0, delta, 16);
@@ -1052,13 +1319,19 @@ function takeDamage(amount) {
 
 function endRun() {
   state.gameOver = true;
-  document.exitPointerLock();
+  if (document.exitPointerLock) {
+    document.exitPointerLock();
+  }
+  if (touchInput.enabled) {
+    deactivateTouchSession(true);
+  }
   setStatus("Mission failed.");
   ui.overlay.classList.remove("hidden");
   ui.overlayTitle.textContent = "Mission failed";
-  ui.overlayCopy.textContent =
-    `You reached wave ${state.wave} with ${state.score} points. Lock the pointer to redeploy the VX-9 and restart the arena.`;
-  ui.startButton.textContent = "Restart mission";
+  ui.overlayCopy.textContent = touchInput.enabled
+    ? `You reached wave ${state.wave} with ${state.score} points. Tap restart and jump back in with the touch HUD.`
+    : `You reached wave ${state.wave} with ${state.score} points. Lock the pointer to redeploy the VX-9 and restart the arena.`;
+  ui.startButton.textContent = touchInput.enabled ? "Restart touch mission" : "Restart mission";
 }
 
 function updateImpacts(delta) {

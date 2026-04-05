@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no"
     />
     <title>Neon Siege FPS Demo</title>
     <meta
@@ -47,6 +47,33 @@
         <p class="deck-copy">Three.js arena demo, live on Vercel</p>
       </div>
     </div>
+    <div class="mobile-ui" id="mobile-ui" aria-hidden="true">
+      <div class="touch-zone movement-zone">
+        <div class="stick-base" id="move-stick">
+          <div class="stick-ring"></div>
+          <div class="stick-thumb" id="move-thumb"></div>
+        </div>
+      </div>
+      <div class="touch-zone look-zone" id="look-zone">
+        <p class="touch-hint">Best on iPhone/iPad in landscape</p>
+        <div class="touch-actions">
+          <button
+            class="touch-button touch-button-jump"
+            id="jump-button"
+            type="button"
+          >
+            Jump
+          </button>
+          <button
+            class="touch-button touch-button-fire"
+            id="fire-button"
+            type="button"
+          >
+            Fire
+          </button>
+        </div>
+      </div>
+    </div>
     <div class="crosshair" aria-hidden="true">
       <span></span>
       <span></span>
@@ -67,6 +94,7 @@
           <li><span>Look</span><strong>Mouse</strong></li>
           <li><span>Jump</span><strong>Space</strong></li>
           <li><span>Shoot</span><strong>Left click</strong></li>
+          <li><span>iPhone/iPad</span><strong>Touch HUD</strong></li>
         </ul>
       </div>
     </section>
