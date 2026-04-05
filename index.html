@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>Neon Siege FPS Demo</title>
+    <meta
+      name="description"
+      content="A lightweight first person shooter prototype built from scratch for the browser."
+    />
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="app"></div>
+    <div class="hud">
+      <div class="panel panel-left panel-mission">
+        <p class="panel-label">Operation</p>
+        <p class="panel-value" id="status">Secure the arena.</p>
+      </div>
+      <div class="panel panel-right">
+        <div>
+          <p class="panel-label">Wave</p>
+          <p class="panel-value" id="wave">1</p>
+        </div>
+        <div>
+          <p class="panel-label">Score</p>
+          <p class="panel-value" id="score">0</p>
+        </div>
+        <div>
+          <p class="panel-label">Health</p>
+          <p class="panel-value" id="health">100</p>
+        </div>
+      </div>
+    </div>
+    <div class="deck" aria-hidden="true">
+      <div class="deck-card weapon-card">
+        <p class="deck-label">Loadout</p>
+        <h2>VX-9 Arc Blaster</h2>
+        <p class="deck-copy">Infinite core // pulse recoil compensator</p>
+      </div>
+      <div class="deck-card build-card">
+        <p class="deck-label">Prototype</p>
+        <p class="build-value">Browser FPS from scratch</p>
+        <p class="deck-copy">Three.js arena demo, live on Vercel</p>
+      </div>
+    </div>
+    <div class="crosshair" aria-hidden="true">
+      <span></span>
+      <span></span>
+    </div>
+    <section class="overlay" id="overlay">
+      <div class="overlay-card">
+        <p class="eyebrow">From scratch demo</p>
+        <h1 id="overlay-title">Neon Siege</h1>
+        <p class="overlay-subtitle">Arc Sector // VX-9 loadout online</p>
+        <p id="overlay-copy">
+          Drop into the arena with a visible pulse rifle, clear incoming drones,
+          and show that a browser-based first person shooter can be built from
+          zero to live demo fast.
+        </p>
+        <button id="start-button" type="button">Start mission</button>
+        <ul class="controls">
+          <li><span>Move</span><strong>W A S D</strong></li>
+          <li><span>Look</span><strong>Mouse</strong></li>
+          <li><span>Jump</span><strong>Space</strong></li>
+          <li><span>Shoot</span><strong>Left click</strong></li>
+        </ul>
+      </div>
+    </section>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
