@@ -18,11 +18,31 @@ const LOOK_SENSITIVITY = {
   touchY: 0.0031,
 };
 const STAGE_OBJECTIVE_SITES = [
-  { label: "the north ring", position: new THREE.Vector3(0, 1.55, -18) },
-  { label: "the east relay", position: new THREE.Vector3(18, 1.55, -3) },
-  { label: "the south lane", position: new THREE.Vector3(2, 1.55, 18) },
-  { label: "the west tower", position: new THREE.Vector3(-18, 1.55, 3) },
-  { label: "the ember platform", position: new THREE.Vector3(13, 1.55, 13) },
+  {
+    label: "the north ring",
+    mapLabel: "North ring",
+    position: new THREE.Vector3(0, 1.55, -18),
+  },
+  {
+    label: "the east relay",
+    mapLabel: "East relay",
+    position: new THREE.Vector3(18, 1.55, -3),
+  },
+  {
+    label: "the south lane",
+    mapLabel: "South lane",
+    position: new THREE.Vector3(2, 1.55, 18),
+  },
+  {
+    label: "the west tower",
+    mapLabel: "West tower",
+    position: new THREE.Vector3(-18, 1.55, 3),
+  },
+  {
+    label: "the ember platform",
+    mapLabel: "Ember platform",
+    position: new THREE.Vector3(13, 1.55, 13),
+  },
 ];
 
 const ui = {
@@ -32,6 +52,8 @@ const ui = {
   health: document.querySelector("#health"),
   status: document.querySelector("#status"),
   objective: document.querySelector("#objective"),
+  minimap: document.querySelector("#minimap"),
+  minimapCaption: document.querySelector("#minimap-caption"),
   overlay: document.querySelector("#overlay"),
   overlayTitle: document.querySelector("#overlay-title"),
   overlayCopy: document.querySelector("#overlay-copy"),
@@ -82,6 +104,9 @@ const tempVector = new THREE.Vector3();
 const muzzleWorldPosition = new THREE.Vector3();
 const aimTarget = new THREE.Vector3();
 const traceMidpoint = new THREE.Vector3();
+const minimapPoint = new THREE.Vector2();
+const minimapPointAlt = new THREE.Vector2();
+const minimapTargetPoint = new THREE.Vector2();
 
 const keys = {
   forward: false,
@@ -135,6 +160,16 @@ const state = {
 const obstacles = [];
 const enemies = [];
 const worldEffects = [];
+const minimapWalls = [];
+const minimap = {
+  canvas: ui.minimap,
+  caption: ui.minimapCaption,
+  ctx: ui.minimap?.getContext("2d") ?? null,
+  width: ui.minimap?.width ?? 200,
+  height: ui.minimap?.height ?? 200,
+  dpr: 1,
+  padding: 14,
+};
 
 buildWorld();
 const weapon = createWeapon();
@@ -142,6 +177,7 @@ const stageGoal = createStageGoal();
 camera.add(weapon.group);
 resetRun();
 attachEvents();
+resizeMinimapCanvas();
 animate();
 
 function buildWorld() {
@@ -167,20 +203,27 @@ function buildWorld() {
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(120, 120),
     new THREE.MeshStandardMaterial({
-      color: 0x08131f,
-      roughness: 0.95,
-      metalness: 0.14,
+      color: 0x112335,
+      emissive: 0x07131f,
+      emissiveIntensity: 0.34,
+      roughness: 0.9,
+      metalness: 0.18,
     }),
   );
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
 
-  const grid = new THREE.GridHelper(72, 72, 0x43c9eb, 0x11263b);
+  const grid = new THREE.GridHelper(72, 72, 0x72f0ff, 0x1c4362);
   grid.position.y = 0.02;
-  grid.material.opacity = 0.22;
+  grid.material.opacity = 0.34;
   grid.material.transparent = true;
   scene.add(grid);
+
+  worldEffects.push((elapsed) => {
+    floor.material.emissiveIntensity = 0.28 + Math.sin(elapsed * 0.9) * 0.05;
+    grid.material.opacity = 0.28 + Math.sin(elapsed * 0.6) * 0.05;
+  });
 
   createGlowStrip(0, 0.05, 9, 8, 0.08, 1.3, 0x56dfff, 1.8, 0.8);
   createGlowStrip(0, 0.05, 2, 11, 0.08, 0.7, 0xff8a5a, 1.6, 0.2);
@@ -551,9 +594,11 @@ function createWeapon() {
 
 function createPerimeterWall(x, y, z, width, height, depth) {
   const material = new THREE.MeshStandardMaterial({
-    color: 0x0d1e2e,
-    roughness: 0.88,
-    metalness: 0.18,
+    color: 0x315a76,
+    emissive: 0x0d2031,
+    emissiveIntensity: 0.34,
+    roughness: 0.74,
+    metalness: 0.28,
   });
 
   const mesh = new THREE.Mesh(
@@ -585,6 +630,14 @@ function createPerimeterWall(x, y, z, width, height, depth) {
 
   worldEffects.push((elapsed) => {
     trim.material.emissiveIntensity = 0.9 + Math.sin(elapsed * 1.4 + x + z) * 0.25;
+    material.emissiveIntensity = 0.28 + Math.sin(elapsed * 0.9 + x * 0.04 + z * 0.04) * 0.05;
+  });
+
+  minimapWalls.push({
+    minX: x - width / 2,
+    maxX: x + width / 2,
+    minZ: z - depth / 2,
+    maxZ: z + depth / 2,
   });
 }
 
@@ -954,6 +1007,17 @@ function getStageSite(stage = state.stage) {
   return STAGE_OBJECTIVE_SITES[(stage - 1) % STAGE_OBJECTIVE_SITES.length];
 }
 
+function updateMinimapCaption() {
+  if (!minimap.caption) {
+    return;
+  }
+
+  const site = getStageSite();
+  minimap.caption.textContent = state.objectiveActive
+    ? `Star core live: ${site.mapLabel}`
+    : `Next star site: ${site.mapLabel}`;
+}
+
 function getAliveEnemyCount() {
   return enemies.reduce((count, enemy) => count + Number(enemy.alive), 0);
 }
@@ -1294,6 +1358,7 @@ function updateHud() {
   ui.health.textContent = String(Math.max(0, Math.round(state.health)));
   ui.health.style.color = state.health <= 35 ? "#ff6f61" : "#ffd166";
   updateObjectiveText();
+  updateMinimapCaption();
 }
 
 function setStatus(message, timeoutMs = 0) {
@@ -1315,6 +1380,7 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  resizeMinimapCanvas();
 
   if (touchInput.moveTouchId === null) {
     ui.moveThumb.style.transform = "translate(-50%, -50%)";
@@ -1346,6 +1412,7 @@ function animate() {
   updateWeapon(delta);
   updateImpacts(delta);
   updateTraces(delta);
+  drawMinimap();
 
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
@@ -1489,6 +1556,216 @@ function updateStageGoal(delta) {
   if (player.position.distanceTo(stageGoal.group.position) < 2.1) {
     collectStageGoal();
   }
+}
+
+function resizeMinimapCanvas() {
+  if (!minimap.canvas || !minimap.ctx) {
+    return;
+  }
+
+  const rect = minimap.canvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const nextWidth = Math.max(1, Math.round(rect.width * dpr));
+  const nextHeight = Math.max(1, Math.round(rect.height * dpr));
+
+  if (
+    minimap.canvas.width !== nextWidth ||
+    minimap.canvas.height !== nextHeight
+  ) {
+    minimap.canvas.width = nextWidth;
+    minimap.canvas.height = nextHeight;
+  }
+
+  minimap.width = rect.width;
+  minimap.height = rect.height;
+  minimap.dpr = dpr;
+}
+
+function mapWorldToMinimap(position, target = new THREE.Vector2()) {
+  const usableWidth = minimap.width - minimap.padding * 2;
+  const usableHeight = minimap.height - minimap.padding * 2;
+  const x =
+    minimap.padding +
+    ((position.x + ARENA_HALF_SIZE) / (ARENA_HALF_SIZE * 2)) * usableWidth;
+  const y =
+    minimap.padding +
+    ((position.z + ARENA_HALF_SIZE) / (ARENA_HALF_SIZE * 2)) * usableHeight;
+
+  target.set(x, y);
+  return target;
+}
+
+function drawMinimapWorldRect(ctx, area, fillStyle) {
+  mapWorldToMinimap(
+    { x: area.minX, z: area.minZ },
+    minimapPoint,
+  );
+  mapWorldToMinimap(
+    { x: area.maxX, z: area.maxZ },
+    minimapPointAlt,
+  );
+
+  const x = minimapPoint.x;
+  const y = minimapPoint.y;
+  const width = minimapPointAlt.x - minimapPoint.x;
+  const height = minimapPointAlt.y - minimapPoint.y;
+
+  ctx.fillStyle = fillStyle;
+  ctx.fillRect(x, y, width, height);
+}
+
+function drawPlayerMarker(ctx, x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(player.rotation.y);
+  ctx.beginPath();
+  ctx.moveTo(0, -9);
+  ctx.lineTo(6.5, 7);
+  ctx.lineTo(0, 3.8);
+  ctx.lineTo(-6.5, 7);
+  ctx.closePath();
+  ctx.fillStyle = "#f4fbff";
+  ctx.shadowColor = "rgba(255,255,255,0.55)";
+  ctx.shadowBlur = 10;
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawStarMarker(ctx, x, y, radius, fillStyle, strokeStyle) {
+  ctx.save();
+  ctx.beginPath();
+  for (let index = 0; index < 10; index += 1) {
+    const spokeRadius = index % 2 === 0 ? radius : radius * 0.46;
+    const angle = -Math.PI / 2 + (index / 10) * Math.PI * 2;
+    const px = x + Math.cos(angle) * spokeRadius;
+    const py = y + Math.sin(angle) * spokeRadius;
+
+    if (index === 0) {
+      ctx.moveTo(px, py);
+    } else {
+      ctx.lineTo(px, py);
+    }
+  }
+  ctx.closePath();
+  ctx.fillStyle = fillStyle;
+  ctx.strokeStyle = strokeStyle;
+  ctx.lineWidth = 1.5;
+  ctx.shadowColor = strokeStyle;
+  ctx.shadowBlur = 12;
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawMinimap() {
+  if (!minimap.canvas || !minimap.ctx) {
+    return;
+  }
+
+  const ctx = minimap.ctx;
+  const width = minimap.width;
+  const height = minimap.height;
+  const pulse = clock.elapsedTime;
+  const site = getStageSite();
+  const targetPosition = state.objectiveActive
+    ? stageGoal.group.position
+    : site.position;
+
+  ctx.setTransform(minimap.dpr, 0, 0, minimap.dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  ctx.fillStyle = "rgba(6, 15, 27, 0.96)";
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.strokeStyle = "rgba(134, 244, 255, 0.1)";
+  ctx.lineWidth = 1;
+  const guideStep = (width - minimap.padding * 2) / 4;
+  for (let index = 1; index < 4; index += 1) {
+    const axis = minimap.padding + guideStep * index;
+    ctx.beginPath();
+    ctx.moveTo(axis, minimap.padding);
+    ctx.lineTo(axis, height - minimap.padding);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(minimap.padding, axis);
+    ctx.lineTo(width - minimap.padding, axis);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "rgba(134, 244, 255, 0.38)";
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(
+    minimap.padding,
+    minimap.padding,
+    width - minimap.padding * 2,
+    height - minimap.padding * 2,
+  );
+
+  for (const wall of minimapWalls) {
+    drawMinimapWorldRect(ctx, wall, "rgba(102, 171, 214, 0.72)");
+  }
+
+  for (const obstacle of obstacles) {
+    drawMinimapWorldRect(ctx, obstacle, "rgba(34, 73, 106, 0.92)");
+  }
+
+  mapWorldToMinimap(player.position, minimapPoint);
+  mapWorldToMinimap(targetPosition, minimapTargetPoint);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.setLineDash(state.objectiveActive ? [] : [5, 5]);
+  ctx.strokeStyle = state.objectiveActive
+    ? "rgba(255, 209, 102, 0.58)"
+    : "rgba(255, 209, 102, 0.3)";
+  ctx.lineWidth = 1.4;
+  ctx.moveTo(minimapPoint.x, minimapPoint.y);
+  ctx.lineTo(minimapTargetPoint.x, minimapTargetPoint.y);
+  ctx.stroke();
+  ctx.restore();
+
+  for (const enemy of enemies) {
+    if (!enemy.alive) {
+      continue;
+    }
+
+    mapWorldToMinimap(enemy.mesh.position, minimapPointAlt);
+    ctx.beginPath();
+    ctx.fillStyle = "#ff8858";
+    ctx.arc(minimapPointAlt.x, minimapPointAlt.y, 3.3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const objectiveRadius = state.objectiveActive
+    ? 8.2 + Math.sin(pulse * 4.8) * 1.2
+    : 6.8;
+  drawStarMarker(
+    ctx,
+    minimapTargetPoint.x,
+    minimapTargetPoint.y,
+    objectiveRadius,
+    state.objectiveActive ? "#ffd166" : "rgba(255, 209, 102, 0.42)",
+    state.objectiveActive ? "#fff3b2" : "rgba(255, 243, 178, 0.46)",
+  );
+
+  ctx.beginPath();
+  ctx.strokeStyle = "rgba(134, 244, 255, 0.55)";
+  ctx.lineWidth = 1.2;
+  ctx.arc(
+    minimapTargetPoint.x,
+    minimapTargetPoint.y,
+    12 + Math.sin(pulse * 3.1) * 1.6,
+    0,
+    Math.PI * 2,
+  );
+  ctx.stroke();
+
+  drawPlayerMarker(ctx, minimapPoint.x, minimapPoint.y);
+
+  ctx.fillStyle = "rgba(223, 242, 255, 0.72)";
+  ctx.font = '700 10px "Orbitron", sans-serif';
+  ctx.textAlign = "center";
+  ctx.fillText("N", width / 2, 10);
 }
 
 function updateWeapon(delta) {
