@@ -22,8 +22,16 @@ const HAS_TOUCH_POINTS = navigator.maxTouchPoints > 0;
 const LOOK_SENSITIVITY = {
   mouseX: 0.0022,
   mouseY: 0.0019,
-  touchX: 0.0035,
-  touchY: 0.0031,
+  touchX: 0.0054,
+  touchY: 0.0046,
+};
+const TOUCH_LOOK_TUNING = {
+  minDt: 10,
+  baseBoost: 1,
+  distanceBoost: 0.022,
+  velocityBoost: 0.05,
+  maxBoostX: 2.75,
+  maxBoostY: 2.1,
 };
 const STAGE_OBJECTIVE_SITES = [
   {
@@ -134,6 +142,7 @@ const touchInput = {
   moveY: 0,
   lastLookX: 0,
   lastLookY: 0,
+  lastLookTime: 0,
   fireHeld: false,
 };
 
@@ -876,6 +885,7 @@ function handleLookTouchStart(event) {
   touchInput.lookTouchId = touch.identifier;
   touchInput.lastLookX = touch.clientX;
   touchInput.lastLookY = touch.clientY;
+  touchInput.lastLookTime = performance.now();
   event.preventDefault();
 }
 
@@ -891,14 +901,12 @@ function handleGlobalTouchMove(event) {
     if (touch.identifier === touchInput.lookTouchId) {
       const deltaX = touch.clientX - touchInput.lastLookX;
       const deltaY = touch.clientY - touchInput.lastLookY;
+      const now = performance.now();
+      const deltaTime = now - touchInput.lastLookTime;
       touchInput.lastLookX = touch.clientX;
       touchInput.lastLookY = touch.clientY;
-      applyLookDelta(
-        deltaX,
-        deltaY,
-        LOOK_SENSITIVITY.touchX,
-        LOOK_SENSITIVITY.touchY,
-      );
+      touchInput.lastLookTime = now;
+      applyTouchLookDelta(deltaX, deltaY, deltaTime);
       handled = true;
     }
   }
@@ -922,6 +930,7 @@ function handleGlobalTouchEnd(event) {
 
     if (touch.identifier === touchInput.lookTouchId) {
       touchInput.lookTouchId = null;
+      touchInput.lastLookTime = 0;
       handled = true;
     }
   }
@@ -961,7 +970,7 @@ function activateTouchSession() {
   ui.mobileUi.setAttribute("aria-hidden", "false");
   ui.overlay.classList.add("hidden");
   ui.crosshair.classList.add("active");
-  setStatus("Touch controls live. Left thumb move, right thumb aim.", 1400);
+  setStatus("Touch controls live. Fast right swipes now turn much quicker.", 1600);
 }
 
 function deactivateTouchSession(showOverlay = false) {
@@ -986,6 +995,7 @@ function resetTouchInputState() {
   touchInput.moveY = 0;
   touchInput.lastLookX = 0;
   touchInput.lastLookY = 0;
+  touchInput.lastLookTime = 0;
   touchInput.fireHeld = false;
   ui.moveThumb.style.transform = "translate(-50%, -50%)";
 }
@@ -1019,6 +1029,26 @@ function applyLookDelta(deltaX, deltaY, sensitivityX, sensitivityY) {
 
   state.lookSwayX = THREE.MathUtils.clamp(deltaX * 0.0009, -0.035, 0.035);
   state.lookSwayY = THREE.MathUtils.clamp(deltaY * 0.0008, -0.03, 0.03);
+}
+
+function applyTouchLookDelta(deltaX, deltaY, deltaTime) {
+  const dt = Math.max(deltaTime, TOUCH_LOOK_TUNING.minDt);
+  const swipeDistance = Math.hypot(deltaX, deltaY);
+  const swipeVelocity = swipeDistance / dt;
+  const rawBoost =
+    TOUCH_LOOK_TUNING.baseBoost +
+    Math.max(0, swipeDistance - 4) * TOUCH_LOOK_TUNING.distanceBoost +
+    swipeVelocity * TOUCH_LOOK_TUNING.velocityBoost;
+
+  const boostX = Math.min(rawBoost, TOUCH_LOOK_TUNING.maxBoostX);
+  const boostY = Math.min(rawBoost, TOUCH_LOOK_TUNING.maxBoostY);
+
+  applyLookDelta(
+    deltaX * boostX,
+    deltaY * boostY,
+    LOOK_SENSITIVITY.touchX,
+    LOOK_SENSITIVITY.touchY,
+  );
 }
 
 function controlsAreActive() {
