@@ -9,7 +9,9 @@ const JUMP_VELOCITY = 8.8;
 const MOVE_SPEED = 8.5;
 const FIRE_COOLDOWN = 0.18;
 const TRACE_FADE_SPEED = 7.5;
-const ENEMY_RADIUS = 0.72;
+const MAX_PARTICLES = 40;
+const MAX_ENEMY_PROJECTILES = 8;
+const MAX_HEALTH_PICKUPS = 2;
 const searchParams = new URLSearchParams(window.location.search);
 const FORCE_TOUCH = searchParams.get("touch") === "1";
 const HAS_FINE_POINTER =
@@ -61,6 +63,209 @@ const STAGE_OBJECTIVE_SITES = [
   },
 ];
 
+/* ── Biomes ── */
+const BIOMES = [
+  {
+    name: "Arc Sector",
+    floor: 0x112335,
+    floorEmissive: 0x07131f,
+    fog: 0x050c17,
+    background: 0x050c17,
+    gridMain: 0x72f0ff,
+    gridSecondary: 0x1c4362,
+    wallColor: 0x315a76,
+    wallEmissive: 0x0d2031,
+    obstacleColors: [0x14283b, 0x112332, 0x1b3146, 0x173046, 0x153042],
+    accentA: 0x56dfff,
+    accentB: 0xff8a5a,
+    ambientSky: 0xa6f7ff,
+    ambientGround: 0x0a1018,
+    ambientIntensity: 1.7,
+    sunColor: 0xf0fbff,
+    sunIntensity: 1.9,
+    shardColor: 0x9af6ff,
+    shardEmissive: 0x23879b,
+    trimA: 0x5ae5ff,
+    trimB: 0xff8b62,
+    glowColumnA: 0x60ebff,
+    glowColumnB: 0xff9066,
+    ringMainColor: 0x8af6ff,
+    ringMainEmissive: 0x1d7f93,
+    ringSubColor: 0xff9f75,
+    ringSubEmissive: 0xa33812,
+    arenaGlowColor: 0x35dff5,
+  },
+  {
+    name: "Ember Wastes",
+    floor: 0x2a1510,
+    floorEmissive: 0x1a0c08,
+    fog: 0x1a0a05,
+    background: 0x1a0a05,
+    gridMain: 0xff6633,
+    gridSecondary: 0x4a2211,
+    wallColor: 0x5a2e1e,
+    wallEmissive: 0x2a1008,
+    obstacleColors: [0x3b1e14, 0x4a2818, 0x33180e, 0x502a16, 0x3a1c10],
+    accentA: 0xff5522,
+    accentB: 0xffaa33,
+    ambientSky: 0xffa477,
+    ambientGround: 0x150805,
+    ambientIntensity: 1.4,
+    sunColor: 0xffccaa,
+    sunIntensity: 2.2,
+    shardColor: 0xff8844,
+    shardEmissive: 0x993311,
+    trimA: 0xff6622,
+    trimB: 0xffbb44,
+    glowColumnA: 0xff7733,
+    glowColumnB: 0xffaa22,
+    ringMainColor: 0xff8844,
+    ringMainEmissive: 0x993311,
+    ringSubColor: 0xffcc66,
+    ringSubEmissive: 0x885500,
+    arenaGlowColor: 0xff6633,
+  },
+  {
+    name: "Void Nexus",
+    floor: 0x0f0a1f,
+    floorEmissive: 0x08051a,
+    fog: 0x08041a,
+    background: 0x08041a,
+    gridMain: 0xaa66ff,
+    gridSecondary: 0x2a1444,
+    wallColor: 0x3a1e5a,
+    wallEmissive: 0x150a2a,
+    obstacleColors: [0x1e0e3b, 0x2a1448, 0x180c33, 0x301850, 0x22103a],
+    accentA: 0xbb77ff,
+    accentB: 0xff55aa,
+    ambientSky: 0xcc99ff,
+    ambientGround: 0x080418,
+    ambientIntensity: 1.3,
+    sunColor: 0xeeccff,
+    sunIntensity: 1.6,
+    shardColor: 0xcc88ff,
+    shardEmissive: 0x6622aa,
+    trimA: 0xbb77ff,
+    trimB: 0xff55aa,
+    glowColumnA: 0xcc88ff,
+    glowColumnB: 0xff66bb,
+    ringMainColor: 0xcc88ff,
+    ringMainEmissive: 0x6622aa,
+    ringSubColor: 0xff77cc,
+    ringSubEmissive: 0x992266,
+    arenaGlowColor: 0xaa55ff,
+  },
+];
+
+function getBiomeForStage(stage) {
+  return BIOMES[Math.floor((stage - 1) / 3) % BIOMES.length];
+}
+
+/* ── Enemy Types ── */
+const ENEMY_TYPES = {
+  drone: {
+    name: "Drone",
+    geometryFactory: () => new THREE.IcosahedronGeometry(0.78, 0),
+    color: 0xff6f53,
+    emissive: 0x7a1f0a,
+    eyeWidth: 0.72,
+    radius: 0.72,
+    baseSpeed: 2.2,
+    stageSpeedBonus: 0.12,
+    hp: 1,
+    damage: 18,
+    attackRange: 1.7,
+    scoreValue: 100,
+    behavior: "chase",
+    bobAmplitude: 0.18,
+    spinX: 0.9,
+    spinY: 1.55,
+    minimapColor: "#ff8858",
+  },
+  scout: {
+    name: "Scout",
+    geometryFactory: () => new THREE.TetrahedronGeometry(0.55, 0),
+    color: 0x44ffaa,
+    emissive: 0x117744,
+    eyeWidth: 0.48,
+    radius: 0.5,
+    baseSpeed: 3.2,
+    stageSpeedBonus: 0.1,
+    hp: 1,
+    damage: 6,
+    attackRange: 1.5,
+    scoreValue: 150,
+    behavior: "strafe",
+    bobAmplitude: 0.25,
+    spinX: 2.2,
+    spinY: 3.0,
+    minimapColor: "#44ffaa",
+  },
+  tank: {
+    name: "Heavy",
+    geometryFactory: () => new THREE.DodecahedronGeometry(1.1, 0),
+    color: 0xff4444,
+    emissive: 0x880000,
+    eyeWidth: 0.92,
+    radius: 1.05,
+    baseSpeed: 1.2,
+    stageSpeedBonus: 0.06,
+    hp: 4,
+    damage: 20,
+    attackRange: 2.0,
+    scoreValue: 300,
+    behavior: "chase",
+    bobAmplitude: 0.08,
+    spinX: 0.3,
+    spinY: 0.5,
+    minimapColor: "#ff4444",
+  },
+  turret: {
+    name: "Turret",
+    geometryFactory: () => new THREE.OctahedronGeometry(0.7, 0),
+    color: 0xffaa22,
+    emissive: 0x884400,
+    eyeWidth: 0.6,
+    radius: 0.65,
+    baseSpeed: 1.6,
+    stageSpeedBonus: 0.08,
+    hp: 2,
+    damage: 12,
+    attackRange: 1.7,
+    scoreValue: 200,
+    behavior: "ranged",
+    projectileSpeed: 10,
+    projectileDamage: 5,
+    fireInterval: 3.0,
+    preferredRange: 12,
+    bobAmplitude: 0.12,
+    spinX: 0.6,
+    spinY: 1.2,
+    minimapColor: "#ffaa22",
+  },
+};
+
+function getSpawnComposition(stage) {
+  const total = 3 + stage * 2;
+  if (stage <= 3) return { drone: total, scout: 0, tank: 0, turret: 0 };
+  if (stage <= 5) return { drone: total - 2, scout: 2, tank: 0, turret: 0 };
+  if (stage <= 7) {
+    return {
+      drone: Math.ceil(total * 0.45),
+      scout: Math.floor(total * 0.25),
+      tank: Math.floor(total * 0.1) || 1,
+      turret: Math.ceil(total * 0.15) || 1,
+    };
+  }
+  return {
+    drone: Math.ceil(total * 0.35),
+    scout: Math.floor(total * 0.25),
+    tank: Math.floor(total * 0.15),
+    turret: Math.ceil(total * 0.2),
+  };
+}
+
+/* ── UI References ── */
 const ui = {
   app: document.querySelector("#app"),
   score: document.querySelector("#score"),
@@ -81,8 +286,12 @@ const ui = {
   lookZone: document.querySelector("#look-zone"),
   fireButton: document.querySelector("#fire-button"),
   jumpButton: document.querySelector("#jump-button"),
+  waveBanner: document.querySelector("#wave-banner"),
+  waveBannerText: document.querySelector("#wave-banner-text"),
+  waveBannerSub: document.querySelector("#wave-banner-sub"),
 };
 
+/* ── Renderer ── */
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -169,10 +378,14 @@ const state = {
   objectiveActive: false,
   objectiveCollected: false,
   objectiveSiteIndex: 0,
+  screenShake: 0,
 };
 
 const obstacles = [];
 const enemies = [];
+const enemyProjectiles = [];
+const particles = [];
+const healthPickups = [];
 const worldEffects = [];
 const navigationColliders = [];
 const worldRaycastTargets = [];
@@ -188,6 +401,31 @@ const minimap = {
 };
 let skyShards = null;
 
+/* ── World object references for biome swaps ── */
+const worldObjects = {
+  floor: null,
+  floorMaterial: null,
+  grid: null,
+  ambient: null,
+  sun: null,
+  arenaGlow: null,
+  walls: [],
+  wallTrims: [],
+  obstacles: [],
+  obstacleAccents: [],
+  glowStrips: [],
+  glowColumns: [],
+  shardMaterial: null,
+  mainRing: null,
+  subRing: null,
+};
+
+/* ── Shared geometries for particles (performance) ── */
+const particleGeo = new THREE.SphereGeometry(0.06, 6, 6);
+const projectileGeo = new THREE.SphereGeometry(0.12, 8, 8);
+const healthPickupGeo = new THREE.OctahedronGeometry(0.35, 0);
+
+/* ── Init ── */
 buildWorld();
 const weapon = createWeapon();
 const stageGoal = createStageGoal();
@@ -197,9 +435,14 @@ attachEvents();
 resizeMinimapCanvas();
 animate();
 
+/* ══════════════════════════════════════════
+   WORLD BUILDING
+   ══════════════════════════════════════════ */
+
 function buildWorld() {
   const ambient = new THREE.HemisphereLight(0xa6f7ff, 0x0a1018, 1.7);
   scene.add(ambient);
+  worldObjects.ambient = ambient;
 
   const sun = new THREE.DirectionalLight(0xf0fbff, 1.9);
   sun.position.set(-10, 20, 10);
@@ -212,35 +455,42 @@ function buildWorld() {
   sun.shadow.camera.top = 28;
   sun.shadow.camera.bottom = -28;
   scene.add(sun);
+  worldObjects.sun = sun;
 
   const arenaGlow = new THREE.PointLight(0x35dff5, 28, 80, 2);
   arenaGlow.position.set(0, 7, -12);
   scene.add(arenaGlow);
+  worldObjects.arenaGlow = arenaGlow;
 
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(120, 120),
-    new THREE.MeshStandardMaterial({
-      color: 0x112335,
-      emissive: 0x07131f,
-      emissiveIntensity: 0.34,
-      roughness: 0.9,
-      metalness: 0.18,
-    }),
-  );
+  const floorMaterial = new THREE.MeshStandardMaterial({
+    color: 0x112335,
+    emissive: 0x07131f,
+    emissiveIntensity: 0.34,
+    roughness: 0.9,
+    metalness: 0.18,
+  });
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), floorMaterial);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
   worldRaycastTargets.push(floor);
+  worldObjects.floor = floor;
+  worldObjects.floorMaterial = floorMaterial;
 
   const grid = new THREE.GridHelper(72, 72, 0x72f0ff, 0x1c4362);
   grid.position.y = 0.02;
   grid.material.opacity = 0.34;
   grid.material.transparent = true;
   scene.add(grid);
+  worldObjects.grid = grid;
 
   worldEffects.push((elapsed) => {
-    floor.material.emissiveIntensity = 0.28 + Math.sin(elapsed * 0.9) * 0.05;
-    grid.material.opacity = 0.28 + Math.sin(elapsed * 0.6) * 0.05;
+    floorMaterial.emissiveIntensity = 0.28 + Math.sin(elapsed * 0.9) * 0.05;
+    if (Array.isArray(grid.material)) {
+      grid.material.forEach((m) => { m.opacity = 0.28 + Math.sin(elapsed * 0.6) * 0.05; });
+    } else {
+      grid.material.opacity = 0.28 + Math.sin(elapsed * 0.6) * 0.05;
+    }
   });
 
   createGlowStrip(0, 0.05, 9, 8, 0.08, 1.3, 0x56dfff, 1.8, 0.8);
@@ -261,6 +511,7 @@ function buildWorld() {
   mainRing.rotation.x = Math.PI / 2;
   mainRing.position.set(0, 6, -14);
   scene.add(mainRing);
+  worldObjects.mainRing = mainRing;
 
   const subRing = new THREE.Mesh(
     new THREE.TorusGeometry(5.8, 0.16, 18, 84),
@@ -275,6 +526,7 @@ function buildWorld() {
   subRing.rotation.x = Math.PI / 2;
   subRing.position.set(0, 4.8, -14);
   scene.add(subRing);
+  worldObjects.subRing = subRing;
 
   worldEffects.push((elapsed) => {
     mainRing.rotation.z = elapsed * 0.18;
@@ -328,6 +580,7 @@ function buildWorld() {
     roughness: 0.15,
     metalness: 0.88,
   });
+  worldObjects.shardMaterial = shardMaterial;
 
   for (let index = 0; index < 88; index += 1) {
     const shard = new THREE.Mesh(shardGeometry, shardMaterial);
@@ -348,6 +601,78 @@ function buildWorld() {
   skyShards.name = "sky-shards";
   scene.add(skyShards);
 }
+
+/* ── Apply biome colors to existing world objects ── */
+function applyBiome(biome) {
+  scene.background.set(biome.background);
+  scene.fog.color.set(biome.fog);
+
+  worldObjects.floorMaterial.color.set(biome.floor);
+  worldObjects.floorMaterial.emissive.set(biome.floorEmissive);
+
+  // Grid helper has array of materials [main, secondary]
+  if (Array.isArray(worldObjects.grid.material)) {
+    worldObjects.grid.material[0].color.set(biome.gridMain);
+    worldObjects.grid.material[1].color.set(biome.gridSecondary);
+  } else {
+    worldObjects.grid.material.color.set(biome.gridMain);
+  }
+
+  worldObjects.ambient.color.set(biome.ambientSky);
+  worldObjects.ambient.groundColor.set(biome.ambientGround);
+  worldObjects.ambient.intensity = biome.ambientIntensity;
+  worldObjects.sun.color.set(biome.sunColor);
+  worldObjects.sun.intensity = biome.sunIntensity;
+  worldObjects.arenaGlow.color.set(biome.arenaGlowColor);
+
+  for (const wall of worldObjects.walls) {
+    wall.material.color.set(biome.wallColor);
+    wall.material.emissive.set(biome.wallEmissive);
+  }
+
+  for (let i = 0; i < worldObjects.wallTrims.length; i++) {
+    const trim = worldObjects.wallTrims[i];
+    const color = i % 2 === 0 ? biome.trimA : biome.trimB;
+    trim.material.color.set(color);
+    trim.material.emissive.set(color);
+  }
+
+  for (let i = 0; i < worldObjects.obstacles.length; i++) {
+    const obs = worldObjects.obstacles[i];
+    obs.material.color.set(biome.obstacleColors[i % biome.obstacleColors.length]);
+  }
+
+  for (const accent of worldObjects.obstacleAccents) {
+    accent.material.color.set(biome.accentA);
+    accent.material.emissive.set(biome.accentA);
+  }
+
+  for (let i = 0; i < worldObjects.glowStrips.length; i++) {
+    const strip = worldObjects.glowStrips[i];
+    const color = i % 2 === 0 ? biome.accentA : biome.accentB;
+    strip.material.color.set(color);
+    strip.material.emissive.set(color);
+  }
+
+  for (let i = 0; i < worldObjects.glowColumns.length; i++) {
+    const col = worldObjects.glowColumns[i];
+    const color = i % 2 === 0 ? biome.glowColumnA : biome.glowColumnB;
+    col.material.color.set(color);
+    col.material.emissive.set(color);
+  }
+
+  worldObjects.shardMaterial.color.set(biome.shardColor);
+  worldObjects.shardMaterial.emissive.set(biome.shardEmissive);
+
+  worldObjects.mainRing.material.color.set(biome.ringMainColor);
+  worldObjects.mainRing.material.emissive.set(biome.ringMainEmissive);
+  worldObjects.subRing.material.color.set(biome.ringSubColor);
+  worldObjects.subRing.material.emissive.set(biome.ringSubEmissive);
+}
+
+/* ══════════════════════════════════════════
+   STAGE GOAL (Star Core)
+   ══════════════════════════════════════════ */
 
 function createStageGoal() {
   const group = new THREE.Group();
@@ -446,6 +771,10 @@ function createStageGoal() {
     baseGlow,
   };
 }
+
+/* ══════════════════════════════════════════
+   WEAPON
+   ══════════════════════════════════════════ */
 
 function createWeapon() {
   const group = new THREE.Group();
@@ -617,6 +946,10 @@ function createWeapon() {
   };
 }
 
+/* ══════════════════════════════════════════
+   WORLD BUILDERS
+   ══════════════════════════════════════════ */
+
 function createPerimeterWall(x, y, z, width, height, depth) {
   const material = new THREE.MeshStandardMaterial({
     color: 0x315a76,
@@ -635,6 +968,7 @@ function createPerimeterWall(x, y, z, width, height, depth) {
   mesh.castShadow = true;
   scene.add(mesh);
   worldRaycastTargets.push(mesh);
+  worldObjects.walls.push(mesh);
 
   const trimColor = depth > width ? 0x5ae5ff : 0xff8b62;
   const trim = new THREE.Mesh(
@@ -653,6 +987,7 @@ function createPerimeterWall(x, y, z, width, height, depth) {
   );
   trim.position.set(x, y + height / 2 + 0.18, z);
   scene.add(trim);
+  worldObjects.wallTrims.push(trim);
 
   worldEffects.push((elapsed) => {
     trim.material.emissiveIntensity = 0.9 + Math.sin(elapsed * 1.4 + x + z) * 0.25;
@@ -688,6 +1023,7 @@ function createGlowStrip(x, y, z, width, height, depth, color, speed, phase) {
   );
   mesh.position.set(x, y, z);
   scene.add(mesh);
+  worldObjects.glowStrips.push(mesh);
 
   worldEffects.push((elapsed) => {
     material.emissiveIntensity = 1.15 + Math.sin(elapsed * speed + phase) * 0.6;
@@ -711,6 +1047,7 @@ function createGlowColumn(x, y, z, color, speed, phase) {
   );
   mesh.position.set(x, y, z);
   scene.add(mesh);
+  worldObjects.glowColumns.push(mesh);
 
   worldEffects.push((elapsed) => {
     mesh.scale.y = 0.92 + Math.sin(elapsed * speed + phase) * 0.05;
@@ -732,6 +1069,7 @@ function createObstacle(x, y, z, width, height, depth, color) {
   mesh.receiveShadow = true;
   scene.add(mesh);
   worldRaycastTargets.push(mesh);
+  worldObjects.obstacles.push(mesh);
 
   const topAccent = new THREE.Mesh(
     new THREE.BoxGeometry(width * 0.6, 0.12, depth * 0.18),
@@ -745,6 +1083,7 @@ function createObstacle(x, y, z, width, height, depth, color) {
   );
   topAccent.position.set(x, y + height / 2 + 0.16, z);
   scene.add(topAccent);
+  worldObjects.obstacleAccents.push(topAccent);
 
   worldEffects.push((elapsed) => {
     topAccent.material.emissiveIntensity = 1 + Math.sin(elapsed * 1.7 + x) * 0.35;
@@ -759,6 +1098,10 @@ function createObstacle(x, y, z, width, height, depth, color) {
   obstacles.push(collider);
   navigationColliders.push(collider);
 }
+
+/* ══════════════════════════════════════════
+   EVENT HANDLERS
+   ══════════════════════════════════════════ */
 
 function attachEvents() {
   ui.startButton.addEventListener("click", () => {
@@ -836,6 +1179,10 @@ function attachEvents() {
   }
 
   window.addEventListener("resize", onResize);
+
+  window.addEventListener("orientationchange", () => {
+    setTimeout(onResize, 100);
+  });
 }
 
 function attachTouchControls() {
@@ -942,6 +1289,10 @@ function handleGlobalTouchEnd(event) {
 
 function handleFireTouchStart(event) {
   touchInput.fireHeld = true;
+  ui.fireButton.style.transform = "scale(0.88)";
+  ui.fireButton.style.boxShadow =
+    "0 0 24px rgba(255,136,88,0.6), inset 0 1px 0 rgba(255,255,255,0.16), 0 18px 45px rgba(0,0,0,0.26)";
+  haptic(15);
   fire();
   event.preventDefault();
   event.stopPropagation();
@@ -949,11 +1300,14 @@ function handleFireTouchStart(event) {
 
 function handleFireTouchEnd(event) {
   touchInput.fireHeld = false;
+  ui.fireButton.style.transform = "";
+  ui.fireButton.style.boxShadow = "";
   event.preventDefault();
   event.stopPropagation();
 }
 
 function handleJumpTouchStart(event) {
+  haptic(8);
   queueJump();
   event.preventDefault();
   event.stopPropagation();
@@ -970,7 +1324,21 @@ function activateTouchSession() {
   ui.mobileUi.setAttribute("aria-hidden", "false");
   ui.overlay.classList.add("hidden");
   ui.crosshair.classList.add("active");
-  setStatus("Touch controls live. Fast right swipes now turn much quicker.", 1600);
+
+  // Request fullscreen for immersive mobile experience
+  const docEl = document.documentElement;
+  if (docEl.requestFullscreen) {
+    docEl.requestFullscreen().catch(() => {});
+  } else if (docEl.webkitRequestFullscreen) {
+    docEl.webkitRequestFullscreen();
+  }
+
+  // Suggest landscape if in portrait
+  if (window.innerHeight > window.innerWidth) {
+    setStatus("Rotate to landscape for best experience.", 3000);
+  } else {
+    setStatus("Touch controls live. Fast swipes for quick turns.", 1600);
+  }
 }
 
 function deactivateTouchSession(showOverlay = false) {
@@ -1012,8 +1380,20 @@ function updateJoystickFromTouch(touch) {
   const clampedX = rawX * scale;
   const clampedY = rawY * scale;
 
-  touchInput.moveX = clampedX / radius;
-  touchInput.moveY = clampedY / radius;
+  let normX = clampedX / radius;
+  let normY = clampedY / radius;
+
+  // Dead zone + quadratic response curve for precise control
+  const deadZone = 0.12;
+  const applyDeadZone = (v) => {
+    const abs = Math.abs(v);
+    if (abs < deadZone) return 0;
+    const sign = Math.sign(v);
+    const normalized = (abs - deadZone) / (1 - deadZone);
+    return sign * normalized * normalized;
+  };
+  touchInput.moveX = applyDeadZone(normX);
+  touchInput.moveY = applyDeadZone(normY);
 
   ui.moveThumb.style.transform = `translate(calc(-50% + ${clampedX}px), calc(-50% + ${clampedY}px))`;
 }
@@ -1058,6 +1438,34 @@ function controlsAreActive() {
 function queueJump() {
   state.jumpQueued = true;
 }
+
+/* ══════════════════════════════════════════
+   HAPTIC FEEDBACK
+   ══════════════════════════════════════════ */
+
+function haptic(durationMs = 15) {
+  if (navigator.vibrate) {
+    navigator.vibrate(durationMs);
+  }
+}
+
+/* ══════════════════════════════════════════
+   WAVE BANNER
+   ══════════════════════════════════════════ */
+
+function showWaveBanner(stage, biomeName) {
+  if (!ui.waveBanner) return;
+  ui.waveBannerText.textContent = `Stage ${stage}`;
+  ui.waveBannerSub.textContent = biomeName;
+  ui.waveBanner.classList.add("is-visible");
+  setTimeout(() => {
+    if (ui.waveBanner) ui.waveBanner.classList.remove("is-visible");
+  }, 2000);
+}
+
+/* ══════════════════════════════════════════
+   GAME LOGIC
+   ══════════════════════════════════════════ */
 
 function getStageSite(stage = state.stage) {
   return STAGE_OBJECTIVE_SITES[(stage - 1) % STAGE_OBJECTIVE_SITES.length];
@@ -1110,7 +1518,7 @@ function updateObjectiveText() {
 
   if (enemiesRemaining > 0) {
     ui.objective.textContent = `Goal: Clear ${enemiesRemaining} ${
-      enemiesRemaining === 1 ? "drone" : "drones"
+      enemiesRemaining === 1 ? "hostile" : "hostiles"
     } to reveal the star core near ${site.label}.`;
     return;
   }
@@ -1161,6 +1569,7 @@ function resetRun() {
   state.jumpQueued = false;
   state.objectiveActive = false;
   state.objectiveCollected = false;
+  state.screenShake = 0;
   stageGoal.group.visible = false;
   state.stageTicket += 1;
 
@@ -1193,6 +1602,12 @@ function clearEnemies() {
   }
 
   enemies.length = 0;
+
+  // Clear enemy projectiles
+  for (const proj of enemyProjectiles) {
+    scene.remove(proj.mesh);
+  }
+  enemyProjectiles.length = 0;
 }
 
 function clearTransientEffects() {
@@ -1206,8 +1621,18 @@ function clearTransientEffects() {
     disposeObject3D(trace.mesh);
   }
 
+  for (const p of particles) {
+    scene.remove(p.mesh);
+  }
+
+  for (const hp of healthPickups) {
+    scene.remove(hp.mesh);
+  }
+
   state.impacts = [];
   state.traces = [];
+  particles.length = 0;
+  healthPickups.length = 0;
 }
 
 function startStage(stage) {
@@ -1220,13 +1645,21 @@ function startStage(stage) {
   stageGoal.group.visible = false;
   stageGoal.group.position.copy(getStageSite(stage).position);
 
-  const count = 3 + stage * 2;
-  for (let index = 0; index < count; index += 1) {
-    spawnEnemy(stage);
+  // Apply biome
+  const biome = getBiomeForStage(stage);
+  applyBiome(biome);
+
+  // Spawn enemies by type
+  const composition = getSpawnComposition(stage);
+  for (const [typeName, count] of Object.entries(composition)) {
+    for (let i = 0; i < count; i++) {
+      spawnEnemy(stage, typeName);
+    }
   }
 
   updateHud();
-  setStatus(`Stage ${stage} deployed. Sweep the arena.`, 1200);
+  showWaveBanner(stage, biome.name);
+  setStatus(`Stage ${stage} // ${biome.name}. Sweep the arena.`, 1200);
 }
 
 function revealStageGoal() {
@@ -1251,6 +1684,7 @@ function collectStageGoal() {
   stageGoal.group.visible = false;
   state.score += 250;
   updateHud();
+  haptic(20);
   setStatus(`Star core secured. Stage ${state.stage + 1} unlocking.`, 1400);
 
   const currentTicket = state.stageTicket;
@@ -1261,24 +1695,26 @@ function collectStageGoal() {
   }, 900);
 }
 
-function spawnEnemy(stage) {
+/* ══════════════════════════════════════════
+   ENEMY SPAWNING & BEHAVIOR
+   ══════════════════════════════════════════ */
+
+function spawnEnemy(stage, typeName = "drone") {
+  const type = ENEMY_TYPES[typeName];
   const material = new THREE.MeshStandardMaterial({
-    color: stage > 3 ? 0xff9a74 : 0xff6f53,
-    emissive: stage > 3 ? 0xa63b14 : 0x7a1f0a,
+    color: type.color,
+    emissive: type.emissive,
     emissiveIntensity: 1.5 + stage * 0.05,
     roughness: 0.32,
     metalness: 0.3,
   });
 
-  const mesh = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(0.78, 0),
-    material,
-  );
-  mesh.castShadow = true;
+  const mesh = new THREE.Mesh(type.geometryFactory(), material);
+  mesh.castShadow = typeName !== "scout"; // scouts too small/fast
   mesh.receiveShadow = true;
 
   const eye = new THREE.Mesh(
-    new THREE.BoxGeometry(0.72, 0.12, 0.18),
+    new THREE.BoxGeometry(type.eyeWidth, 0.12, 0.18),
     new THREE.MeshStandardMaterial({
       color: 0xeefcff,
       emissive: 0x7cf2ff,
@@ -1286,7 +1722,7 @@ function spawnEnemy(stage) {
       roughness: 0.15,
     }),
   );
-  eye.position.set(0, 0, 0.7);
+  eye.position.set(0, 0, type.radius * 0.97);
   mesh.add(eye);
 
   const spawnPoint = randomSpawnPoint();
@@ -1295,11 +1731,21 @@ function spawnEnemy(stage) {
 
   const enemy = {
     mesh,
-    speed: THREE.MathUtils.randFloat(1.8, 2.7) + stage * 0.12,
+    type: typeName,
+    speed: THREE.MathUtils.randFloat(type.baseSpeed * 0.85, type.baseSpeed * 1.15) + stage * type.stageSpeedBonus,
     bobSpeed: THREE.MathUtils.randFloat(3, 5.2),
     bobOffset: Math.random() * Math.PI * 2,
     baseY: spawnPoint.y,
     alive: true,
+    hp: type.hp,
+    // Strafe behavior (scout)
+    strafeAngle: Math.random() * Math.PI * 2,
+    strafeDir: Math.random() > 0.5 ? 1 : -1,
+    dartTimer: THREE.MathUtils.randFloat(3.5, 6),
+    isDarting: false,
+    dartDuration: 0,
+    // Ranged behavior (turret)
+    fireCooldown: THREE.MathUtils.randFloat(0, type.fireInterval || 2),
   };
   mesh.userData.enemyRef = enemy;
   eye.userData.enemyRef = enemy;
@@ -1364,6 +1810,10 @@ function findFallbackSpawnPoint() {
   return new THREE.Vector3(0, 1.7, -18);
 }
 
+/* ══════════════════════════════════════════
+   SHOOTING
+   ══════════════════════════════════════════ */
+
 function fire() {
   if (!controlsAreActive() || state.gameOver || state.fireCooldown > 0) {
     return;
@@ -1372,6 +1822,7 @@ function fire() {
   state.fireCooldown = FIRE_COOLDOWN;
   state.recoil = Math.min(state.recoil + 1.1, 1.4);
   state.muzzleFlash = 1;
+  haptic(15);
 
   ui.crosshair.classList.add("damage");
   window.setTimeout(() => ui.crosshair.classList.remove("damage"), 120);
@@ -1405,23 +1856,47 @@ function fire() {
     return;
   }
 
-  target.alive = false;
-  state.score += 100;
+  const type = ENEMY_TYPES[target.type];
+
+  target.hp -= 1;
   createTracer(firstHit.point, true);
   createImpact(firstHit.point);
-  setStatus("Direct hit. Drone neutralized.", 850);
-  scene.remove(target.mesh);
-  disposeObject3D(target.mesh);
-  target.mesh = null;
-  updateHud();
 
-  if (enemies.every((enemy) => !enemy.alive)) {
-    const currentTicket = state.stageTicket;
+  if (target.hp <= 0) {
+    // Kill
+    target.alive = false;
+    state.score += type.scoreValue;
+    setStatus(`Direct hit. ${type.name} neutralized.`, 850);
+    spawnKillParticles(target.mesh.position, type.color);
+    maybeSpawnHealthPickup();
+    scene.remove(target.mesh);
+    disposeObject3D(target.mesh);
+    target.mesh = null;
+    updateHud();
+
+    if (enemies.every((enemy) => !enemy.alive)) {
+      const currentTicket = state.stageTicket;
+      window.setTimeout(() => {
+        if (!state.gameOver && currentTicket === state.stageTicket) {
+          revealStageGoal();
+        }
+      }, 650);
+    }
+  } else {
+    // Hit but not dead — flash white
+    state.score += 10;
+    const origColor = target.mesh.material.color.getHex();
+    target.mesh.material.color.set(0xffffff);
+    target.mesh.material.emissiveIntensity = 4;
+    const meshRef = target.mesh;
     window.setTimeout(() => {
-      if (!state.gameOver && currentTicket === state.stageTicket) {
-        revealStageGoal();
+      if (meshRef) {
+        meshRef.material.color.set(origColor);
+        meshRef.material.emissiveIntensity = 1.5;
       }
-    }, 650);
+    }, 80);
+    setStatus(`Hit! ${type.name} damaged (${target.hp} HP left).`, 700);
+    updateHud();
   }
 }
 
@@ -1473,6 +1948,92 @@ function createImpact(position) {
   });
 }
 
+/* ══════════════════════════════════════════
+   KILL PARTICLES
+   ══════════════════════════════════════════ */
+
+function spawnKillParticles(position, color) {
+  const count = Math.min(10, MAX_PARTICLES - particles.length);
+  if (count <= 0) return;
+
+  for (let i = 0; i < count; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 1.0,
+    });
+    const mesh = new THREE.Mesh(particleGeo, mat);
+    mesh.position.copy(position);
+    const dir = new THREE.Vector3(
+      (Math.random() - 0.5) * 2,
+      Math.random() * 1.5,
+      (Math.random() - 0.5) * 2,
+    ).normalize();
+    scene.add(mesh);
+    particles.push({
+      mesh,
+      mat,
+      dir,
+      speed: THREE.MathUtils.randFloat(4, 8),
+      age: 0,
+    });
+  }
+}
+
+/* ══════════════════════════════════════════
+   HEALTH PICKUPS
+   ══════════════════════════════════════════ */
+
+function maybeSpawnHealthPickup() {
+  if (healthPickups.length >= MAX_HEALTH_PICKUPS || Math.random() > 0.3) return;
+
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x44ff88,
+    emissive: 0x11aa44,
+    emissiveIntensity: 2.0,
+    roughness: 0.2,
+    metalness: 0.5,
+  });
+  const mesh = new THREE.Mesh(healthPickupGeo, mat);
+  const pos = randomSpawnPoint();
+  pos.y = 0.8;
+  mesh.position.copy(pos);
+  mesh.castShadow = true;
+  scene.add(mesh);
+  healthPickups.push({ mesh, mat, age: 0 });
+}
+
+/* ══════════════════════════════════════════
+   ENEMY PROJECTILES
+   ══════════════════════════════════════════ */
+
+function fireEnemyProjectile(enemy) {
+  if (enemyProjectiles.length >= MAX_ENEMY_PROJECTILES) return;
+
+  const dir = new THREE.Vector3();
+  dir.subVectors(player.position, enemy.mesh.position).normalize();
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xffaa22,
+    transparent: true,
+    opacity: 0.9,
+  });
+  const mesh = new THREE.Mesh(projectileGeo, mat);
+  mesh.position.copy(enemy.mesh.position);
+  scene.add(mesh);
+  enemyProjectiles.push({
+    mesh,
+    mat,
+    direction: dir,
+    speed: ENEMY_TYPES.turret.projectileSpeed,
+    damage: ENEMY_TYPES.turret.projectileDamage,
+    age: 0,
+  });
+}
+
+/* ══════════════════════════════════════════
+   HUD
+   ══════════════════════════════════════════ */
+
 function updateHud() {
   ui.score.textContent = String(state.score);
   ui.stage.textContent = String(state.stage);
@@ -1508,6 +2069,10 @@ function onResize() {
   }
 }
 
+/* ══════════════════════════════════════════
+   GAME LOOP
+   ══════════════════════════════════════════ */
+
 function animate() {
   const delta = Math.min(clock.getDelta(), 0.033);
 
@@ -1522,6 +2087,7 @@ function animate() {
   if (controlsAreActive() && !state.gameOver) {
     updateMovement(delta);
     updateEnemies(delta);
+    updateEnemyProjectiles(delta);
 
     if (touchInput.fireHeld) {
       fire();
@@ -1530,8 +2096,11 @@ function animate() {
 
   updateStageGoal(delta);
   updateWeapon(delta);
+  updateScreenShake(delta);
   updateImpacts(delta);
   updateTraces(delta);
+  updateParticles(delta);
+  updateHealthPickups(delta);
   drawMinimap();
 
   renderer.render(scene, camera);
@@ -1625,60 +2194,176 @@ function collidesWithColliders(x, z, radius) {
   });
 }
 
+/* ══════════════════════════════════════════
+   ENEMY UPDATE WITH BEHAVIORS
+   ══════════════════════════════════════════ */
+
 function updateEnemies(delta) {
   for (const enemy of enemies) {
     if (!enemy.alive || !enemy.mesh) {
       continue;
     }
 
+    const type = ENEMY_TYPES[enemy.type];
+    const distToPlayer = enemy.mesh.position.distanceTo(player.position);
+
+    // Behavior branching
+    if (type.behavior === "chase") {
+      updateChaseEnemy(enemy, delta);
+    } else if (type.behavior === "strafe") {
+      updateStrafeEnemy(enemy, delta, distToPlayer);
+    } else if (type.behavior === "ranged") {
+      updateRangedEnemy(enemy, delta, distToPlayer);
+    }
+
+    // Bobbing
+    enemy.mesh.position.y =
+      enemy.baseY +
+      Math.sin(clock.elapsedTime * enemy.bobSpeed + enemy.bobOffset) * type.bobAmplitude;
+
+    // Spinning
+    enemy.mesh.rotation.x += delta * type.spinX;
+    enemy.mesh.rotation.y += delta * type.spinY;
+    enemy.mesh.material.emissiveIntensity =
+      1.35 + Math.sin(clock.elapsedTime * 2.4 + enemy.bobOffset) * 0.3;
+
+    // Contact damage
+    if (distToPlayer < type.attackRange) {
+      takeDamage(type.damage * delta);
+    }
+  }
+}
+
+function updateChaseEnemy(enemy, delta) {
+  tempVector.set(
+    player.position.x - enemy.mesh.position.x,
+    0,
+    player.position.z - enemy.mesh.position.z,
+  );
+
+  if (tempVector.lengthSq() > 0.0001) {
+    tempVector.normalize().multiplyScalar(enemy.speed * delta);
+    moveEnemy(enemy, tempVector.x, tempVector.z);
+  }
+}
+
+function updateStrafeEnemy(enemy, delta, distToPlayer) {
+  enemy.dartTimer -= delta;
+
+  if (enemy.isDarting) {
+    // Dart directly at player
+    enemy.dartDuration -= delta;
+    if (enemy.dartDuration <= 0) {
+      enemy.isDarting = false;
+      enemy.dartTimer = THREE.MathUtils.randFloat(3.5, 6);
+    }
     tempVector.set(
       player.position.x - enemy.mesh.position.x,
       0,
       player.position.z - enemy.mesh.position.z,
     );
-
     if (tempVector.lengthSq() > 0.0001) {
-      tempVector.normalize().multiplyScalar(enemy.speed * delta);
+      tempVector.normalize().multiplyScalar(enemy.speed * 1.5 * delta);
       moveEnemy(enemy, tempVector.x, tempVector.z);
     }
+  } else {
+    // Circle around player
+    enemy.strafeAngle += enemy.strafeDir * delta * 1.8;
 
-    enemy.mesh.position.y =
-      enemy.baseY +
-      Math.sin(clock.elapsedTime * enemy.bobSpeed + enemy.bobOffset) * 0.18;
+    // Move perpendicular to player direction
+    const toPlayer = tempVector.set(
+      player.position.x - enemy.mesh.position.x,
+      0,
+      player.position.z - enemy.mesh.position.z,
+    );
+    const dist = toPlayer.length();
+    if (dist > 0.1) {
+      toPlayer.normalize();
+      // Perpendicular vector
+      const perpX = -toPlayer.z * enemy.strafeDir;
+      const perpZ = toPlayer.x * enemy.strafeDir;
 
-    enemy.mesh.rotation.x += delta * 0.9;
-    enemy.mesh.rotation.y += delta * 1.55;
-    enemy.mesh.material.emissiveIntensity =
-      1.35 + Math.sin(clock.elapsedTime * 2.4 + enemy.bobOffset) * 0.3;
+      // Combine: mostly perpendicular, slight inward pull
+      const inwardPull = dist > 8 ? 0.4 : dist < 4 ? -0.3 : 0.1;
+      const mx = (perpX * 0.8 + toPlayer.x * inwardPull) * enemy.speed * delta;
+      const mz = (perpZ * 0.8 + toPlayer.z * inwardPull) * enemy.speed * delta;
+      moveEnemy(enemy, mx, mz);
+    }
 
-    const distance = enemy.mesh.position.distanceTo(player.position);
-    if (distance < 1.7) {
-      takeDamage(18 * delta);
+    // Trigger dart attack
+    if (enemy.dartTimer <= 0 && distToPlayer < 15) {
+      enemy.isDarting = true;
+      enemy.dartDuration = 0.5;
     }
   }
 }
 
-function moveEnemy(enemy, offsetX, offsetZ) {
-  const proposedX = THREE.MathUtils.clamp(
-    enemy.mesh.position.x + offsetX,
-    -ARENA_HALF_SIZE + ENEMY_RADIUS,
-    ARENA_HALF_SIZE - ENEMY_RADIUS,
+function updateRangedEnemy(enemy, delta, distToPlayer) {
+  const type = ENEMY_TYPES[enemy.type];
+
+  // Movement: maintain preferred range
+  tempVector.set(
+    player.position.x - enemy.mesh.position.x,
+    0,
+    player.position.z - enemy.mesh.position.z,
   );
 
-  if (!collidesWithColliders(proposedX, enemy.mesh.position.z, ENEMY_RADIUS)) {
+  if (tempVector.lengthSq() > 0.0001) {
+    const dir = tempVector.clone().normalize();
+
+    if (distToPlayer > type.preferredRange * 1.2) {
+      // Too far, move closer
+      tempVector.copy(dir).multiplyScalar(enemy.speed * delta);
+      moveEnemy(enemy, tempVector.x, tempVector.z);
+    } else if (distToPlayer < type.preferredRange * 0.5) {
+      // Too close, back away
+      tempVector.copy(dir).multiplyScalar(-enemy.speed * delta);
+      moveEnemy(enemy, tempVector.x, tempVector.z);
+    } else {
+      // In range, strafe slightly
+      const perpX = -dir.z;
+      const perpZ = dir.x;
+      tempVector.set(perpX, 0, perpZ).multiplyScalar(enemy.speed * 0.5 * delta);
+      moveEnemy(enemy, tempVector.x, tempVector.z);
+    }
+  }
+
+  // Fire projectile
+  enemy.fireCooldown -= delta;
+  if (enemy.fireCooldown <= 0 && distToPlayer < type.preferredRange * 1.5) {
+    fireEnemyProjectile(enemy);
+    enemy.fireCooldown = type.fireInterval;
+  }
+}
+
+function moveEnemy(enemy, offsetX, offsetZ) {
+  const type = ENEMY_TYPES[enemy.type];
+  const radius = type.radius;
+
+  const proposedX = THREE.MathUtils.clamp(
+    enemy.mesh.position.x + offsetX,
+    -ARENA_HALF_SIZE + radius,
+    ARENA_HALF_SIZE - radius,
+  );
+
+  if (!collidesWithColliders(proposedX, enemy.mesh.position.z, radius)) {
     enemy.mesh.position.x = proposedX;
   }
 
   const proposedZ = THREE.MathUtils.clamp(
     enemy.mesh.position.z + offsetZ,
-    -ARENA_HALF_SIZE + ENEMY_RADIUS,
-    ARENA_HALF_SIZE - ENEMY_RADIUS,
+    -ARENA_HALF_SIZE + radius,
+    ARENA_HALF_SIZE - radius,
   );
 
-  if (!collidesWithColliders(enemy.mesh.position.x, proposedZ, ENEMY_RADIUS)) {
+  if (!collidesWithColliders(enemy.mesh.position.x, proposedZ, radius)) {
     enemy.mesh.position.z = proposedZ;
   }
 }
+
+/* ══════════════════════════════════════════
+   UPDATES
+   ══════════════════════════════════════════ */
 
 function updateStageGoal(delta) {
   if (!stageGoal.group.visible) {
@@ -1699,6 +2384,101 @@ function updateStageGoal(delta) {
   if (player.position.distanceTo(stageGoal.group.position) < 2.1) {
     collectStageGoal();
   }
+}
+
+function updateScreenShake(delta) {
+  state.screenShake = smoothTo(state.screenShake, 0, delta, 6);
+  if (state.screenShake > 0.01) {
+    camera.position.x = (Math.random() - 0.5) * state.screenShake * 0.5;
+    camera.position.y = (Math.random() - 0.5) * state.screenShake * 0.3;
+  } else {
+    camera.position.x = 0;
+    camera.position.y = 0;
+  }
+}
+
+function updateEnemyProjectiles(delta) {
+  const survivors = [];
+  for (const proj of enemyProjectiles) {
+    proj.age += delta;
+    proj.mesh.position.addScaledVector(proj.direction, proj.speed * delta);
+
+    // Hit player check
+    if (proj.mesh.position.distanceTo(player.position) < 1.0) {
+      takeDamage(proj.damage);
+      scene.remove(proj.mesh);
+      continue;
+    }
+
+    // Out of bounds or too old
+    if (
+      proj.age > 4 ||
+      Math.abs(proj.mesh.position.x) > ARENA_HALF_SIZE + 5 ||
+      Math.abs(proj.mesh.position.z) > ARENA_HALF_SIZE + 5
+    ) {
+      scene.remove(proj.mesh);
+      continue;
+    }
+
+    // Pulse effect
+    proj.mat.opacity = 0.7 + Math.sin(proj.age * 20) * 0.3;
+    proj.mesh.scale.setScalar(1 + Math.sin(proj.age * 15) * 0.15);
+
+    survivors.push(proj);
+  }
+  enemyProjectiles.length = 0;
+  enemyProjectiles.push(...survivors);
+}
+
+function updateParticles(delta) {
+  const survivors = [];
+  for (const p of particles) {
+    p.age += delta;
+    p.mesh.position.addScaledVector(p.dir, p.speed * delta);
+    p.speed *= 0.96;
+    p.mat.opacity = Math.max(0, 1 - p.age * 2.5);
+    p.mesh.scale.setScalar(Math.max(0.1, 1 - p.age * 1.8));
+    if (p.age < 0.5) {
+      survivors.push(p);
+    } else {
+      scene.remove(p.mesh);
+    }
+  }
+  particles.length = 0;
+  particles.push(...survivors);
+}
+
+function updateHealthPickups(delta) {
+  const elapsed = clock.elapsedTime;
+  const survivors = [];
+  for (const hp of healthPickups) {
+    hp.age += delta;
+    hp.mesh.rotation.y = elapsed * 2.5;
+    hp.mesh.position.y = 0.8 + Math.sin(elapsed * 3) * 0.15;
+    hp.mat.emissiveIntensity = 1.5 + Math.sin(elapsed * 4) * 0.5;
+
+    // Blink when about to despawn
+    if (hp.age > 12) {
+      hp.mesh.visible = Math.sin(hp.age * 12) > 0;
+    }
+
+    if (player.position.distanceTo(hp.mesh.position) < 1.8) {
+      state.health = Math.min(100, state.health + 25);
+      updateHud();
+      setStatus("+25 HP restored.", 800);
+      haptic(20);
+      scene.remove(hp.mesh);
+      continue;
+    }
+
+    if (hp.age > 15) {
+      scene.remove(hp.mesh);
+      continue;
+    }
+    survivors.push(hp);
+  }
+  healthPickups.length = 0;
+  healthPickups.push(...survivors);
 }
 
 function resizeMinimapCanvas() {
@@ -1867,15 +2647,36 @@ function drawMinimap() {
   ctx.stroke();
   ctx.restore();
 
+  // Draw enemies color-coded by type
   for (const enemy of enemies) {
-    if (!enemy.alive) {
+    if (!enemy.alive || !enemy.mesh) {
       continue;
     }
 
+    const type = ENEMY_TYPES[enemy.type];
     mapWorldToMinimap(enemy.mesh.position, minimapPointAlt);
     ctx.beginPath();
-    ctx.fillStyle = "#ff8858";
-    ctx.arc(minimapPointAlt.x, minimapPointAlt.y, 3.3, 0, Math.PI * 2);
+    ctx.fillStyle = type.minimapColor;
+    const dotSize = enemy.type === "tank" ? 4.5 : 3.3;
+    ctx.arc(minimapPointAlt.x, minimapPointAlt.y, dotSize, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Draw health pickups as green dots
+  for (const hp of healthPickups) {
+    mapWorldToMinimap(hp.mesh.position, minimapPointAlt);
+    ctx.beginPath();
+    ctx.fillStyle = "#44ff88";
+    ctx.arc(minimapPointAlt.x, minimapPointAlt.y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Draw enemy projectiles as small orange dots
+  for (const proj of enemyProjectiles) {
+    mapWorldToMinimap(proj.mesh.position, minimapPointAlt);
+    ctx.beginPath();
+    ctx.fillStyle = "#ffaa22";
+    ctx.arc(minimapPointAlt.x, minimapPointAlt.y, 2, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -1949,6 +2750,8 @@ function takeDamage(amount) {
   }
 
   state.health = Math.max(0, state.health - amount);
+  state.screenShake = Math.min(state.screenShake + 0.3, 0.6);
+  haptic(40);
   updateHud();
   document.body.classList.add("damage");
   window.setTimeout(() => document.body.classList.remove("damage"), 120);
